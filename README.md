@@ -1,6 +1,6 @@
 # Tessara
 
-**Live demo:** https://harryrobbins.github.io/tessara/ — frame rates depend on
+**Live demo:** https://harryrobbins.github.io/tessera/ — frame rates depend on
 your GPU (see [Measuring performance honestly](#measuring-performance-honestly)).
 
 A GPU **unit visualisation** engine for the browser. A *tessera* is the single
@@ -110,9 +110,9 @@ like any other. Without them the column is simply absent.
 Push to `main` and `.github/workflows/deploy.yml` builds and publishes to
 GitHub Pages at the URL above. Typecheck and the vitest suite gate the
 `vite build` step — a broken build never reaches Pages. Pages serves from a
-sub-path (`/tessara/`), so `vite.config.ts` sets `base: './'` (relative);
-runtime `fetch()`s in `src/data/` already use relative paths, so they resolve
-the same way in dev and under the sub-path.
+sub-path, so `vite.config.ts` sets `base: './'` (relative); runtime
+`fetch()`s in `src/data/` already use relative paths, so they resolve the
+same way in dev and under the sub-path regardless of the repo name.
 
 ## Not built yet
 
