@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Tessera — a GPU unit-visualisation engine for the browser, in the spirit of Microsoft Live Labs Pivot",
+  "description": "Tessera \u2014 a GPU unit-visualisation engine for the browser, in the spirit of Microsoft Live Labs Pivot",
+  "packageManager": "pnpm@11.3.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
