@@ -59,6 +59,7 @@ in float v_sel;
 uniform sampler2D u_atlas;
 uniform float u_texEnable;   // 0 disables atlas sampling entirely
 uniform float u_radius;      // corner radius as a fraction of the card
+uniform float u_edgeAA;      // 1 = feathered edges, 0 = hard (for tiling quads)
 
 out vec4 outColor;
 
@@ -68,7 +69,10 @@ void main() {
   float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 
   // One-pixel feather regardless of zoom; tiny cards stay legible dots.
-  float aa = max(fwidth(d), 1.0 / max(v_px, 1.0));
+  // Cards that tile edge to edge must NOT be feathered: two abutting half-covered
+  // edges composite to less than full coverage, and that seam beats against the
+  // display grid as moire. Collapsing the feather makes the seam exact instead.
+  float aa = max(fwidth(d), 1.0 / max(v_px, 1.0)) * u_edgeAA + 1e-6;
   float mask = 1.0 - smoothstep(-aa, aa, d);
   if (mask <= 0.002) discard;
 

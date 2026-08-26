@@ -262,9 +262,17 @@ export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy
 
   // Size the plot so it holds roughly one card per item at the data's aspect.
   const dataAspect = xSpan / ySpan;
-  const w = Math.max(1, Math.sqrt(Math.max(1, order.length) * dataAspect));
-  const h = w / dataAspect;
-  const sx = w / xSpan;
+  let w = Math.max(1, Math.sqrt(Math.max(1, order.length) * dataAspect));
+  let h = w / dataAspect;
+  let sx = w / xSpan;
+  // Data already on a unit grid — an image raster, integer coordinates — must be
+  // placed at scale 1 exactly. A scale of 1.002 leaves a 0.2% gap at every seam,
+  // which beats against the sample grid as a dark line every ~140 cards.
+  if (Math.abs(sx - 1) < 0.1) {
+    sx = 1;
+    w = xSpan;
+    h = ySpan;
+  }
   const sy = h / ySpan;
   const x0 = -w / 2;
   const y0 = -h / 2;

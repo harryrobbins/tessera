@@ -51,6 +51,8 @@ export class CardRenderer {
   transitionMs = 900;
   stagger = 0.25;
   cornerRadius = 0.14;
+  /** 1 = antialiased card edges; 0 = hard edges, for layouts whose cards tile. */
+  edgeAA = 1;
   hasAtlas = false;
   lastUploadMs = 0;
   gpuHint = 'unknown';
@@ -90,7 +92,7 @@ export class CardRenderer {
       throw new Error(`program link failed: ${gl.getProgramInfoLog(prog)}`);
     }
     this.program = prog;
-    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_texEnable', 'u_radius']) {
+    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_texEnable', 'u_radius', 'u_edgeAA']) {
       this.u[name] = gl.getUniformLocation(prog, name);
     }
 
@@ -302,6 +304,7 @@ export class CardRenderer {
     gl.uniform1f(this.u.u_stagger!, this.stagger);
     gl.uniform1f(this.u.u_texEnable!, this.hasAtlas ? 1 : 0);
     gl.uniform1f(this.u.u_radius!, this.cornerRadius);
+    gl.uniform1f(this.u.u_edgeAA!, this.edgeAA);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
     gl.uniform1i(this.u.u_atlas!, 0);

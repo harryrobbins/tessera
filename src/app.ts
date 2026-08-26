@@ -270,6 +270,9 @@ export class PivotApp {
     if (seq !== this.solveSeq) return; // a newer request won
     this.lastSolveMs = sol.solveMs;
     this.lastLayoutName = spec.type;
+    // Only the raw scatter places cards at full pitch, and only an atlas-free
+    // collection fills every cell — that is the one case where quads truly tile.
+    this.renderer.edgeAA = spec.type === 'xy' && this.dataset?.cards === false ? 0 : 1;
     this.bounds = sol.bounds;
     this.visible = sol.visible;
     this.renderer.setTargets(sol.positions);
