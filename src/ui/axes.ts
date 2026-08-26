@@ -45,6 +45,8 @@ export class AxisOverlay {
     frag.appendChild(line(0, y, cssW, y));
     let lastRight = -Infinity;
     for (const t of axis.ticks) {
+      // A filtered-out bucket draws no bar; labelling the gap just adds noise.
+      if (t.count === 0) continue;
       const x = this.toX(t.pos, cam, cssW);
       if (x < -80 || x > cssW + 80) continue;
       const label = t.count !== undefined ? `${t.label}  ·  ${fmtCount(t.count)}` : t.label;

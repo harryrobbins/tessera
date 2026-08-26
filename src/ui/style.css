@@ -45,6 +45,7 @@ body {
   overflow-x: auto;
   scrollbar-width: thin;
 }
+.topbar > * { flex: none; }
 .brand {
   display: flex; align-items: center; gap: 8px;
   font-weight: 650; letter-spacing: .2px; padding-right: 6px;
@@ -71,8 +72,8 @@ select, button {
 select:hover, button:hover { background: var(--surface-3); }
 select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; background: transparent; padding: 5px 11px; color: var(--ink-2); }
+.seg { display: flex; flex: none; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 5px 11px; color: var(--ink-2); white-space: nowrap; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.active { background: var(--accent); color: #fff; }
 #zoomSeg button {

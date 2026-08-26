@@ -64,7 +64,10 @@ uniform float u_edgeAA;      // 1 = feathered edges, 0 = hard (for tiling quads)
 out vec4 outColor;
 
 void main() {
-  float r = u_radius;
+  // Tiling quads are square: a corner radius on a card that covers one device
+  // pixel puts every pixel centre exactly on the rounded corner, where the SDF
+  // reads "outside" and the whole collection discards itself.
+  float r = u_radius * u_edgeAA;
   vec2 q = abs(v_local) - (0.5 - r);
   float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 
@@ -73,7 +76,9 @@ void main() {
   // edges composite to less than full coverage, and that seam beats against the
   // display grid as moire. Collapsing the feather makes the seam exact instead.
   float aa = max(fwidth(d), 1.0 / max(v_px, 1.0)) * u_edgeAA + 1e-6;
-  float mask = 1.0 - smoothstep(-aa, aa, d);
+  // With hard edges the rasteriser's own coverage is the answer — every fragment
+  // it hands us belongs to exactly one quad, so never mask and never discard.
+  float mask = mix(1.0, 1.0 - smoothstep(-aa, aa, d), u_edgeAA);
   if (mask <= 0.002) discard;
 
   vec3 rgb = v_color.rgb;

@@ -40,6 +40,7 @@ let sortPinned = false;
 const PIXEL_TITLES: Record<string, string> = {
   'starry-night': 'Starry Night Over the Rhône',
   'great-wave': 'The Great Wave',
+  'millot-papillons': 'Millot’s Butterflies',
 };
 datasetSel.innerHTML = [
   '<option value="titanic">Titanic — 891</option>',
@@ -271,6 +272,8 @@ function describeZoom() {
 
 async function load(key: string) {
   sortPinned = false;
+  // Keep the menu honest when the collection came from ?dataset= rather than a click.
+  if (datasetSel.value !== key) datasetSel.value = key;
   toast(`Building ${key.startsWith('products') ? Number(key.split(':')[1]).toLocaleString() + ' cards' : 'the Titanic collection'}…`, 1400);
   const t0 = performance.now();
   await app.loadDataset(key);
