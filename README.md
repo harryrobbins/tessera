@@ -1,5 +1,8 @@
 # Tessara
 
+**Live demo:** https://harryrobbins.github.io/tessara/ — frame rates depend on
+your GPU (see [Measuring performance honestly](#measuring-performance-honestly)).
+
 A GPU **unit visualisation** engine for the browser. A *tessera* is the single
 tile in a mosaic — one row of your data, meaningless alone, legible in the mass.
 
@@ -101,6 +104,15 @@ adds a `Segment` categorical column. That is the hook for SAM output: export the
 masks as a colour-indexed PNG at any resolution and a JSON id→label map, drop
 both in `public/data/`, and segments become a facet you can filter and bucket by
 like any other. Without them the column is simply absent.
+
+## Deploying
+
+Push to `main` and `.github/workflows/deploy.yml` builds and publishes to
+GitHub Pages at the URL above. Typecheck and the vitest suite gate the
+`vite build` step — a broken build never reaches Pages. Pages serves from a
+sub-path (`/tessara/`), so `vite.config.ts` sets `base: './'` (relative);
+runtime `fetch()`s in `src/data/` already use relative paths, so they resolve
+the same way in dev and under the sub-path.
 
 ## Not built yet
 
