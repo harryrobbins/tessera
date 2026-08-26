@@ -2,12 +2,12 @@ import { defineConfig } from 'vite';
 import checker from 'vite-plugin-checker';
 
 export default defineConfig({
-  // GitHub Pages serves the built demo at /tessara/, not the domain root.
+  // GitHub Pages serves the built demo at /tessera/, not the domain root.
   // Relative base works for every asset kind this app uses, including the
   // layout worker: `new URL('./worker.ts', import.meta.url)` resolves
   // against the *emitting chunk's* import.meta.url, which the browser always
   // sets to its real served location regardless of `base` — verified by
-  // building and serving dist/ under a /tessara/ mount with Playwright
+  // building and serving dist/ under a /tessera/ mount with Playwright
   // (worker loads, titanic.csv and public/data JPEGs both resolve, first
   // layout completes). Also leaves `pnpm dev` at root untouched.
   base: './',

@@ -1,11 +1,11 @@
 ---
-name: tessara-eval
-description: Evaluates the Tessara engine end to end — measures FPS/GPU time across dataset sizes, screenshots every layout, judges the visual result against the data-viz and web-interface guidelines, and returns a ranked list of fixes. Read-only: it diagnoses, it never edits. Use after any change to the renderer, layouts, atlas, or UI, and before deciding what to work on next.
+name: tessera-eval
+description: Evaluates the Tessera engine end to end — measures FPS/GPU time across dataset sizes, screenshots every layout, judges the visual result against the data-viz and web-interface guidelines, and returns a ranked list of fixes. Read-only: it diagnoses, it never edits. Use after any change to the renderer, layouts, atlas, or UI, and before deciding what to work on next.
 tools: Bash, Read, Glob, Grep, Skill, WebFetch
 model: opus
 ---
 
-# Tessara evaluator
+# Tessera evaluator
 
 You judge the current state of `/var/web/pivot` on three axes — **performance**,
 **visual quality**, and **correctness of the measurement itself** — and hand back

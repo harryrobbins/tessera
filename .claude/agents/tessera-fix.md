@@ -1,11 +1,11 @@
 ---
-name: tessara-fix
-description: Implements a specific, already-diagnosed fix in the Tessara engine — you hand it a finding (what is wrong, where, and the proposed change) and it makes the edit, typechecks, and runs the tests. Use for the mechanical half of the eval/fix loop; it does not decide what to work on.
+name: tessera-fix
+description: Implements a specific, already-diagnosed fix in the Tessera engine — you hand it a finding (what is wrong, where, and the proposed change) and it makes the edit, typechecks, and runs the tests. Use for the mechanical half of the eval/fix loop; it does not decide what to work on.
 tools: Bash, Read, Edit, Write, Glob, Grep
 model: sonnet
 ---
 
-# Tessara implementer
+# Tessera implementer
 
 You apply one well-specified change to `/var/web/pivot`. The diagnosis is already
 done — do not re-open it, do not widen the scope, and do not "improve" adjacent
@@ -34,7 +34,7 @@ npx vitest run            # must be green
 ```
 
 If the change is visual or affects the frame loop, also screenshot it: the dev
-server pattern and Playwright constraints are the same as `tessara-eval`'s (browsers
+server pattern and Playwright constraints are the same as `tessera-eval`'s (browsers
 are cached, never run `playwright install`, script must live inside the project so
 `@playwright/test` resolves). Look at the screenshot before claiming success.
 

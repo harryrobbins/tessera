@@ -1,4 +1,4 @@
-# Tessara
+# Tessera
 
 **Live demo:** https://harryrobbins.github.io/tessera/ — frame rates depend on
 your GPU (see [Measuring performance honestly](#measuring-performance-honestly)).
