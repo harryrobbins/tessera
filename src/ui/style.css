@@ -75,6 +75,11 @@ select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); o
 .seg button { border: 0; border-radius: 0; background: transparent; padding: 5px 11px; color: var(--ink-2); }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.active { background: var(--accent); color: #fff; }
+#zoomSeg button {
+  width: 30px; padding: 5px 0; text-align: center;
+  font-size: 15px; line-height: 1; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
 
 button.ghost { background: transparent; }
 

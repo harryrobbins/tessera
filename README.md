@@ -24,7 +24,7 @@ pnpm bench          # headless benchmark -> bench-results/*.json
 |---|---|
 | **Layouts** | Grid (sorted mosaic), Bars (cards stacked into buckets), Cross-tab (binned X × Y), Scatter (raw numeric axes) |
 | **Datasets** | Titanic (891), synthetic products up to 2,000,000 rows, and pixel collections built from a photograph |
-| **Interaction** | Wheel zoom about the cursor, drag pan, click for the detail pane, cross-filtering facet sidebar |
+| **Interaction** | Wheel zoom about the cursor, drag pan, `−`/`+` stepped zoom, click for the detail pane, cross-filtering facet sidebar |
 | **Measurement** | Live FPS + GPU-time HUD, and a scripted benchmark that writes comparable JSON per machine |
 
 ## Architecture
@@ -97,6 +97,14 @@ pixel keeps its own colour. Two engine features exist for this:
   which paints each card its own pixel value instead of a categorical hue.
 - `Dataset.cards = false` — no atlas at all. Items render as flat quads with
   near-square corners so they tile seamlessly.
+
+**Whole-pixel scales.** A raster is free of moire only when a cell covers a
+whole number of device pixels; at 1.42 each cell covers either one device pixel
+or two, and that alternation reads as a grid ruled over the picture. Framing a
+pixel collection rounds to the nearest whole scale, and the `−`/`+` buttons step
+the ladder — … 1:3, 1:2, 1:1, 2:1, 3:1 … — so every stop is clean. The metrics
+readout shows the current scale, and flags it when free zoom has left the ladder.
+Card collections have no such constraint and step geometrically.
 
 **Segmentation.** `loadPixels` looks for `data/<image>.segments.png` alongside
 the image plus a `data/<image>.segments.json` label map, and if both are present

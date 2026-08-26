@@ -237,12 +237,16 @@ let metricsOn = (() => {
 setMetrics(metricsOn);
 $('metricsBtn').addEventListener('click', () => setMetrics((metricsOn = !metricsOn)));
 
+$('zoomIn').addEventListener('click', () => app.zoomStep(1));
+$('zoomOut').addEventListener('click', () => app.zoomStep(-1));
 $('fitBtn').addEventListener('click', () => app.fit());
 
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'SELECT') return;
   if (e.key === 'f') app.fit();
   if (e.key === 'm') setMetrics((metricsOn = !metricsOn));
+  if (e.key === '+' || e.key === '=') app.zoomStep(1);
+  if (e.key === '-' || e.key === '_') app.zoomStep(-1);
   if (e.key === 'Escape') { detailEl.hidden = true; }
 });
 
@@ -255,6 +259,14 @@ function setLayoutKind(kind: LayoutSpec['type']) {
   }
   fillAxisSelects();
   updateControls();
+  describeZoom();
+}
+
+function describeZoom() {
+    const raster = app.isRasterView;
+    $('zoomSeg').title = raster
+      ? 'Steps between whole-pixel scales (1:2, 1:1, 2:1 …) — the only scales a pixel collection renders without moire'
+      : 'Zoom in and out';
 }
 
 async function load(key: string) {

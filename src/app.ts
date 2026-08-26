@@ -1,5 +1,6 @@
 import { CardRenderer } from './gl/renderer';
 import { CameraController } from './gl/camera';
+import { wholePixelZoom, stepWholePixelZoom, stepFreeZoom } from './gl/zoom';
 import { CardAtlas, type CardSpec } from './gl/atlas';
 import { LayoutEngine } from './layout/client';
 import type { LayoutSpec, Bounds, Axis, LayoutData } from './layout/layouts';
@@ -23,6 +24,8 @@ export interface FrameModel {
   gpuMs: number;
   dpr: number;
   buffer: [number, number];
+  /** Device pixels per cell, for raster views only. */
+  scale: number | null;
   animating: boolean;
   idle: boolean;
 }
@@ -290,11 +293,27 @@ export class PivotApp {
     await this.setLayout(this.spec);
   }
 
+  /** True when cards tile one-per-cell and the scale must stay a whole number. */
+  get isRasterView(): boolean {
+    return this.dataset?.cards === false && this.spec.type === 'xy';
+  }
+
+  /** Device pixels per cell, for the readout. */
+  get scale(): number {
+    return this.camera.current.zoom * (this.renderer.to[2] || 1);
+  }
+
+  /** One step along the ladder the current collection needs. */
+  zoomStep(dir: 1 | -1) {
+    const z = this.camera.target.zoom;
+    this.camera.zoomTo(this.isRasterView ? stepWholePixelZoom(z, dir) : stepFreeZoom(z, dir));
+    this.dirty = true;
+  }
+
   fit(animate = true) {
     // Land the camera at the same moment the cards do.
-    const raster = this.dataset?.cards === false && this.spec.type === 'xy';
     this.camera.fit(this.bounds, 72, animate, this.renderer.transitionMs,
-      raster ? wholePixelZoom : undefined);
+      this.isRasterView ? wholePixelZoom : undefined);
     this.dirty = true;
   }
 
@@ -349,6 +368,7 @@ export class PivotApp {
       gpuMs: this.renderer.gpuMs,
       dpr: this.dpr,
       buffer: [this.canvas.width, this.canvas.height],
+      scale: this.isRasterView ? this.scale : null,
       animating,
       idle: this.idle,
     });
@@ -367,25 +387,6 @@ async function loadByKey(key: string): Promise<Dataset> {
 }
 
 export { PIXEL_IMAGES };
-
-/**
- * Nearest whole number of device pixels per cell, chosen in log space so 1.42
- * rounds to 2 rather than 1 — slight overflow the viewer can pan beats a picture
- * occupying half the window. Below 1:1 it steps 1/2, 1/3, … for the same reason:
- * a fractional scale makes each cell cover one device pixel or two, and that
- * alternation is what reads as a grid over the image.
- */
-export function wholePixelZoom(z: number): number {
-  if (z >= 1) {
-    const lo = Math.max(1, Math.floor(z));
-    const hi = lo + 1;
-    return Math.log(z / lo) <= Math.log(hi / z) ? lo : hi;
-  }
-  const inv = 1 / z;
-  const lo = Math.max(1, Math.floor(inv));
-  const hi = lo + 1;
-  return 1 / (Math.log(inv / lo) <= Math.log(hi / inv) ? lo : hi);
-}
 
 /** Deterministic, well-spread stagger delay in 0..1 (golden-ratio sequence). */
 function stagger(i: number): number {

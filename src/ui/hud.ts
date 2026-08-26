@@ -72,6 +72,7 @@ export interface HudModel {
   gpuMs: number;
   dpr: number;
   buffer: [number, number];
+  scale: number | null;
   animating: boolean;
   idle: boolean;
 }
@@ -118,6 +119,7 @@ export class Hud {
       row('gpu upload', `${model.uploadMs.toFixed(1)} ms`),
       row('draw calls', '1'),
       row('device', `${model.dpr}x · ${model.buffer[0]}×${model.buffer[1]}`),
+      ...(model.scale === null ? [] : [row('scale', fmtScale(model.scale))]),
     ].join('');
 
     this.drawSpark(stats);
@@ -160,6 +162,13 @@ export class Hud {
   setGpu(name: string) {
     this.el.title = name;
   }
+}
+
+/** Device pixels per cell: 2 reads as 2:1, 0.5 as 1:2. */
+function fmtScale(s: number): string {
+  const exact = Math.abs(s - Math.round(s)) < 0.01 || Math.abs(1 / s - Math.round(1 / s)) < 0.01;
+  const text = s >= 1 ? `${s.toFixed(s % 1 ? 2 : 0)}:1` : `1:${(1 / s).toFixed((1 / s) % 1 ? 2 : 0)}`;
+  return exact ? text : `${text} (fractional)`;
 }
 
 function row(label: string, value: string) {

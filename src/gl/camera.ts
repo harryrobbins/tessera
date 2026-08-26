@@ -108,6 +108,11 @@ export class CameraController {
     this.flyTo({ x, y, zoom: zoom !== undefined ? clamp(zoom, this.minZoom, this.maxZoom) : this.target.zoom }, ms);
   }
 
+  /** Change scale about the viewport centre, keeping the centred point fixed. */
+  zoomTo(zoom: number, ms = 260) {
+    this.flyTo({ x: this.target.x, y: this.target.y, zoom: clamp(zoom, this.minZoom, this.maxZoom) }, ms);
+  }
+
   /** Eased flight to an exact camera. ms = 0 lands immediately. */
   flyTo(to: Camera, ms = 900) {
     this.target = { ...to };
