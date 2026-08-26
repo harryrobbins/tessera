@@ -67,11 +67,16 @@ function currentSpec(): LayoutSpec {
     case 'bars':
       return { type: 'bars', by: barSel.value || app.defaultBucket(), bins: 12, sortBy: sortSel.value || undefined };
     case 'xy': {
-      // A raw scatter needs two numeric axes; a categorical pick falls back.
+      // The menus only offer numeric columns here; this is a belt-and-braces
+      // guard, and it must never silently plot a different column than the one
+      // named in the dropdown.
       const nums = app.dataset ? Object.keys(app.dataset.columns)
         .filter((f) => app.dataset!.columns[f]?.kind === 'number') : [];
-      const pick = (v: string, alt: number) => (nums.includes(v) ? v : nums[alt] ?? nums[0] ?? v);
-      return { type: 'xy', x: pick(xSel.value, 0), y: pick(ySel.value, 1) };
+      const x = nums.includes(xSel.value) ? xSel.value : nums[0] ?? xSel.value;
+      const y = nums.includes(ySel.value) ? ySel.value : nums[1] ?? nums[0] ?? ySel.value;
+      if (x !== xSel.value) xSel.value = x;
+      if (y !== ySel.value) ySel.value = y;
+      return { type: 'xy', x, y };
     }
     case 'scatter':
       return {
@@ -141,6 +146,23 @@ function showDetail(i: number) {
 
 // ------------------------------------------------------------------- wiring
 
+/**
+ * The cross-tab bins whatever it is given, but a raw scatter needs two numeric
+ * axes. Offering a categorical there and quietly substituting a number for it —
+ * which is what used to happen — produces a chart that is a lie.
+ */
+function fillAxisSelects() {
+  const ds = app.dataset;
+  if (!ds) return;
+  const cats = ds.facets.filter((f) => ds.columns[f]?.kind === 'category');
+  const nums = ds.facets.filter((f) => ds.columns[f]?.kind === 'number');
+  const xOpts = layoutKind === 'xy' ? nums : [...cats, ...nums];
+  const yOpts = layoutKind === 'xy' ? nums : [...nums, ...cats];
+  const keep = (v: string, opts: string[], alt: string) => (opts.includes(v) ? v : alt);
+  fillSelect(xSel, xOpts, keep(xSel.value, xOpts, xOpts[0] ?? ''));
+  fillSelect(ySel, yOpts, keep(ySel.value, yOpts, yOpts[1] ?? yOpts[0] ?? ''));
+}
+
 app.onDataset = (ds) => {
   const cats = ds.facets.filter((f) => ds.columns[f]?.kind === 'category');
   const nums = ds.facets.filter((f) => ds.columns[f]?.kind === 'number');
@@ -148,6 +170,7 @@ app.onDataset = (ds) => {
   fillSelect(barSel, [...cats, ...nums], cats[0] ?? ds.facets[0]);
   fillSelect(xSel, [...cats, ...nums], cats[0] ?? ds.facets[0]);
   fillSelect(ySel, [...nums, ...cats], nums[0] ?? cats[1] ?? ds.facets[0]);
+  fillAxisSelects();
   colorSel.innerHTML =
     (ds.rgb ? `<option value="${TRUE_COLOUR}"${app.colorBy === TRUE_COLOUR ? ' selected' : ''}>True colour</option>` : '') +
     ds.facets.map((f) => `<option value="${f}"${f === app.colorBy ? ' selected' : ''}>${f}</option>`).join('');
@@ -174,7 +197,7 @@ app.onSelect = (i) => {
 
 app.onFrame = (stats, model) => {
   hud.update(stats, model, performance.now());
-  axes.render(app.camera.current, canvas.clientWidth, canvas.clientHeight, Math.min(window.devicePixelRatio || 1, 2));
+  axes.render(app.camera.current, canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio || 1);
 };
 
 facets.onChange = () => { void app.setMask(facets.mask()); };
@@ -230,6 +253,7 @@ function setLayoutKind(kind: LayoutSpec['type']) {
     b.classList.toggle('active', on);
     b.setAttribute('aria-selected', String(on));
   }
+  fillAxisSelects();
   updateControls();
 }
 

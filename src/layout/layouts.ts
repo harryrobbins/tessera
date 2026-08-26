@@ -249,7 +249,7 @@ export function scatterLayout(data: LayoutData, spec: Extract<LayoutSpec, { type
  * the data's own aspect ratio preserved. For a pixel collection (X, Y of an
  * image) this reproduces the picture exactly — cards land on the integer grid.
  */
-export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy' }>, mask?: Uint8Array | null): LayoutResult {
+export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy' }>, mask?: Uint8Array | null, aspect = 1.6): LayoutResult {
   const { positions } = empty(data.n);
   const xc = data.columns[spec.x];
   const yc = data.columns[spec.y];
@@ -260,20 +260,34 @@ export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy
   const xSpan = xc.max - xc.min || 1;
   const ySpan = yc.max - yc.min || 1;
 
-  // Size the plot so it holds roughly one card per item at the data's aspect.
-  const dataAspect = xSpan / ySpan;
-  let w = Math.max(1, Math.sqrt(Math.max(1, order.length) * dataAspect));
-  let h = w / dataAspect;
-  let sx = w / xSpan;
-  // Data already on a unit grid — an image raster, integer coordinates — must be
-  // placed at scale 1 exactly. A scale of 1.002 leaves a 0.2% gap at every seam,
-  // which beats against the sample grid as a dark line every ~140 cards.
-  if (Math.abs(sx - 1) < 0.1) {
-    sx = 1;
+  // A dense integer raster — an image — is the one case where the two axes share
+  // a unit and the picture's own proportions must be preserved exactly. Scale 1,
+  // nothing else: 1.002 would leave a 0.2% gap at every seam, which beats against
+  // the sample grid as a dark line every ~140 cards.
+  const cells = (xSpan + 1) * (ySpan + 1);
+  const isRaster =
+    Number.isInteger(xc.min) && Number.isInteger(xc.max) &&
+    Number.isInteger(yc.min) && Number.isInteger(yc.max) &&
+    Math.abs(order.length - cells) / Math.max(1, order.length) < 0.02;
+
+  let w: number;
+  let h: number;
+  let sx: number;
+  let sy: number;
+  if (isRaster) {
     w = xSpan;
     h = ySpan;
+    sx = 1;
+    sy = 1;
+  } else {
+    // Otherwise the axes carry unrelated units — years against pounds — so
+    // preserving the data's own ratio only squashes the plot into a strip.
+    // Fill the viewport and let each axis take its own scale.
+    w = Math.max(1, Math.sqrt(Math.max(1, order.length) * aspect));
+    h = w / aspect;
+    sx = w / xSpan;
+    sy = h / ySpan;
   }
-  const sy = h / ySpan;
   const x0 = -w / 2;
   const y0 = -h / 2;
 
@@ -313,6 +327,6 @@ export function computeLayout(data: LayoutData, spec: LayoutSpec, mask?: Uint8Ar
     case 'grid': return gridLayout(data, spec, mask, aspect);
     case 'bars': return barsLayout(data, spec, mask, aspect);
     case 'scatter': return scatterLayout(data, spec, mask);
-    case 'xy': return xyLayout(data, spec, mask);
+    case 'xy': return xyLayout(data, spec, mask, aspect);
   }
 }

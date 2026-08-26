@@ -21,6 +21,8 @@ export interface FrameModel {
   uploadMs: number;
   gpu: string;
   gpuMs: number;
+  dpr: number;
+  buffer: [number, number];
   animating: boolean;
   idle: boolean;
 }
@@ -84,7 +86,10 @@ export class PivotApp {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // Never cap this. A buffer smaller than the CSS box is upscaled by the
+    // compositor, and resampling a one-quad-per-pixel image produces a beat
+    // pattern of dark lines that the GL buffer itself never contains.
+    const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
     const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -340,6 +345,8 @@ export class PivotApp {
       uploadMs: this.renderer.lastUploadMs,
       gpu: this.renderer.gpuHint,
       gpuMs: this.renderer.gpuMs,
+      dpr: this.dpr,
+      buffer: [this.canvas.width, this.canvas.height],
       animating,
       idle: this.idle,
     });

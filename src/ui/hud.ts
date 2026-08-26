@@ -70,6 +70,8 @@ export interface HudModel {
   uploadMs: number;
   gpu: string;
   gpuMs: number;
+  dpr: number;
+  buffer: [number, number];
   animating: boolean;
   idle: boolean;
 }
@@ -115,6 +117,7 @@ export class Hud {
       row('layout solve', `${model.solveMs.toFixed(1)} ms`),
       row('gpu upload', `${model.uploadMs.toFixed(1)} ms`),
       row('draw calls', '1'),
+      row('device', `${model.dpr}x · ${model.buffer[0]}×${model.buffer[1]}`),
     ].join('');
 
     this.drawSpark(stats);
