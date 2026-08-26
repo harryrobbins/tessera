@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { srgbToLinear, linearRgbToXyz, xyzToLab, rgbToLab, rgbToHsl, buildPixelColumns } from '../src/data/pixels';
+import {
+  srgbToLinear,
+  linearRgbToXyz,
+  xyzToLab,
+  rgbToLab,
+  rgbToHsl,
+  buildPixelColumns,
+  decodeSegmentId,
+  buildSegmentColumns,
+} from '../src/data/pixels';
 
 describe('srgbToLinear', () => {
   it('maps 0 -> 0 and 255 -> 1', () => {
@@ -216,5 +225,89 @@ describe('buildPixelColumns (hot-loop pinning)', () => {
     const idxWhite = swatches.findIndex(([r, g, b]) => r === 255 && g === 255 && b === 255);
     expect(cols.toneCodes[idxBlack]).toBe(0); // Shadow
     expect(cols.toneCodes[idxWhite]).toBe(4); // Highlight
+  });
+});
+
+describe('decodeSegmentId', () => {
+  it('packs (r<<16)|(g<<8)|b', () => {
+    expect(decodeSegmentId(0, 0, 0)).toBe(0);
+    expect(decodeSegmentId(0, 0, 1)).toBe(1);
+    expect(decodeSegmentId(0, 1, 0)).toBe(256);
+    expect(decodeSegmentId(1, 0, 0)).toBe(65536);
+    expect(decodeSegmentId(255, 0, 0)).toBe(16711680); // matches the doc-comment example ("sky")
+    expect(decodeSegmentId(0, 255, 0)).toBe(65280); // matches the doc-comment example ("sea")
+    expect(decodeSegmentId(255, 255, 255)).toBe(16777215);
+  });
+});
+
+describe('buildSegmentColumns (pure core of the mask/JSON pairing, no DOM/fetch)', () => {
+  // Three pixels: id 16711680 -> "sky", id 65280 -> "sea", id 0 -> nothing
+  // in the map (falls back to Unsegmented like a genuinely unmapped id).
+  const rawIds = Int32Array.from([16711680, 65280, 16711680, 0]);
+  const validJson = {
+    segments: [
+      { id: 16711680, label: 'sky', area: 120 },
+      { id: 65280, label: 'sea' }, // no area -> NaN, and this must not throw
+    ],
+  };
+
+  it('dictionary-encodes categories with Unsegmented always at code 0', () => {
+    const result = buildSegmentColumns(rawIds, validJson);
+    expect(result).not.toBeNull();
+    expect(result!.categories[0]).toBe('Unsegmented');
+    expect(result!.codes[3]).toBe(0); // id 0 has no map entry -> Unsegmented
+    const skyCode = result!.categories.indexOf('sky');
+    const seaCode = result!.categories.indexOf('sea');
+    expect(result!.codes[0]).toBe(skyCode);
+    expect(result!.codes[2]).toBe(skyCode);
+    expect(result!.codes[1]).toBe(seaCode);
+  });
+
+  it('carries a numeric area per category and NaN where the JSON omitted it', () => {
+    const result = buildSegmentColumns(rawIds, validJson)!;
+    const skyCode = result.categories.indexOf('sky');
+    const seaCode = result.categories.indexOf('sea');
+    expect(result.areaByCode[skyCode]).toBe(120);
+    expect(Number.isNaN(result.areaByCode[seaCode])).toBe(true);
+    expect(Number.isNaN(result.areaByCode[0])).toBe(true); // Unsegmented
+  });
+
+  it('still works with the documented minimal {id,label} shape (no area at all)', () => {
+    const minimal = { segments: [{ id: 16711680, label: 'sky' }] };
+    const result = buildSegmentColumns(rawIds, minimal);
+    expect(result).not.toBeNull();
+    expect(result!.categories).toContain('sky');
+    expect(Number.isNaN(result!.areaByCode[result!.categories.indexOf('sky')])).toBe(true);
+  });
+
+  it('returns null, never throws, for malformed input', () => {
+    expect(buildSegmentColumns(rawIds, null)).toBeNull();
+    expect(buildSegmentColumns(rawIds, undefined)).toBeNull();
+    expect(buildSegmentColumns(rawIds, 'not an object')).toBeNull();
+    expect(buildSegmentColumns(rawIds, 42)).toBeNull();
+    expect(buildSegmentColumns(rawIds, {})).toBeNull(); // no `segments` key
+    expect(buildSegmentColumns(rawIds, { segments: 'nope' })).toBeNull(); // not an array
+    // Malformed entries inside an otherwise-valid array are just skipped.
+    const messy = {
+      segments: [null, 42, { id: 'not-a-number', label: 'x' }, { id: 1 }, { id: 16711680, label: 'sky' }],
+    };
+    const result = buildSegmentColumns(rawIds, messy);
+    expect(result).not.toBeNull();
+    expect(result!.categories).toEqual(['Unsegmented', 'sky']);
+  });
+
+  it('is idempotent/order-stable: first-seen id for a label wins its area', () => {
+    // Two different ids sharing one label — rare in practice, but must not throw,
+    // and the category area is whichever id's area is discovered first.
+    const dupIds = Int32Array.from([1, 2]);
+    const json = {
+      segments: [
+        { id: 1, label: 'blob', area: 10 },
+        { id: 2, label: 'blob', area: 999 },
+      ],
+    };
+    const result = buildSegmentColumns(dupIds, json)!;
+    expect(result.categories).toEqual(['Unsegmented', 'blob']);
+    expect(result.areaByCode[1]).toBe(10);
   });
 });

@@ -86,8 +86,11 @@ in well under a second, with no per-row string allocation.
 
 Every pixel of a photograph is a row: `X`, `Y`, `R`, `G`, `B`, `Luminance`,
 `Hue`, `Saturation`, `Lightness`, CIELAB `L*`/`a*`/`b*`, `Chroma`, plus
-categorical `Hue family` and `Tone` bands. Two public-domain paintings ship in
-`public/data/` (credits in `public/data/CREDITS.md`).
+categorical `Hue family` and `Tone` bands. Three public-domain images ship in
+`public/data/` (credits in `public/data/CREDITS.md`): two paintings, and
+Adolphe Millot's *Papillons* plate — ~40 discrete, differently coloured
+butterflies and moths on a plain ground, which is what segmentation below is
+actually for (a painting has no discrete objects to segment).
 
 They open in the **Scatter** layout with `X`/`Y` on the axes, which reproduces
 the picture exactly — then any other layout explodes it into a chart while every
@@ -108,10 +111,33 @@ Card collections have no such constraint and step geometrically.
 
 **Segmentation.** `loadPixels` looks for `data/<image>.segments.png` alongside
 the image plus a `data/<image>.segments.json` label map, and if both are present
-adds a `Segment` categorical column. That is the hook for SAM output: export the
-masks as a colour-indexed PNG at any resolution and a JSON id→label map, drop
-both in `public/data/`, and segments become a facet you can filter and bucket by
-like any other. Without them the column is simply absent.
+adds a `Segment` categorical column (plus a numeric `Segment area`, in native-
+resolution pixels, NaN where unsegmented). That is the hook for SAM output:
+export the masks as a colour-indexed PNG at native resolution and a JSON
+id→label map, drop both in `public/data/`, and segments become a facet you can
+filter and bucket by like any other. Without them both columns are simply
+absent.
+
+The hook isn't hypothetical: `pipeline/` is a self-contained `uv`-managed
+Python pipeline (separate from the web app) that runs **FastSAM-s** — a
+SAM-family automatic mask generator practical on CPU, chosen because this box
+has no usable discrete GPU — over an image, cleans up the raw masks (drops
+tiny/duplicate proposals, resolves overlaps so a specimen always beats the
+coarser background region it sits inside), and writes the `.segments.png` +
+`.segments.json` pair. Run it with:
+
+```bash
+cd pipeline
+uv run segment.py ../public/data/millot-papillons.jpg --out-dir ../public/data
+```
+
+~4-5 seconds end to end on CPU for the 1400x2131 *Papillons* plate: 58
+specimen segments, covering ~42% of the image's pixels (the rest is the
+plain background, correctly left `Unsegmented`). Bucket the *Papillons*
+collection by `Segment` in the Bars layout with Colour = True colour to see
+it — each bar is one specimen's pixels, in their own colours. See
+`pipeline/README.md` for model choice, the CPU-only dependency pinning, and
+how to add another image.
 
 ## Deploying
 

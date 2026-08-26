@@ -45,12 +45,13 @@
 
 import { Dataset, Column, numeric, categoryFromCodes } from './columnar';
 
-export const PIXEL_IMAGES = ['starry-night', 'great-wave'] as const;
+export const PIXEL_IMAGES = ['starry-night', 'great-wave', 'millot-papillons'] as const;
 export type PixelImage = (typeof PIXEL_IMAGES)[number];
 
 const IMAGE_TITLES: Record<PixelImage, string> = {
   'starry-night': 'Starry Night Over the Rhône',
   'great-wave': 'The Great Wave off Kanagawa',
+  'millot-papillons': 'Papillons (Larousse pour tous)',
 };
 
 /* ------------------------------------------------------------------------ *
@@ -262,7 +263,7 @@ function buildDataset(
   w: number,
   h: number,
   data: Uint8ClampedArray,
-  segments: { codes: Int32Array; categories: string[] } | null
+  segments: SegmentColumns | null
 ): Dataset {
   const n = w * h;
   const p = buildPixelColumns(w, h, data);
@@ -289,6 +290,11 @@ function buildDataset(
   if (segments) {
     columns.Segment = categoryFromCodes('Segment', segments.codes, segments.categories);
     facets.push('Segment');
+
+    const segmentArea = new Float32Array(n);
+    for (let i = 0; i < n; i++) segmentArea[i] = segments.areaByCode[segments.codes[i]];
+    columns['Segment area'] = numeric('Segment area', segmentArea, (v) => Math.round(v).toLocaleString());
+    facets.push('Segment area');
   }
   facets.push('X', 'Y', 'R', 'G', 'B', 'Luminance', 'Hue', 'Saturation', 'Lightness', 'L*', 'a*', 'b*', 'Chroma');
 
@@ -323,16 +329,98 @@ function get2dContext(canvas: AnyCanvas): AnyContext2D | null {
 }
 
 /**
+ * Segment ids are colour-encoded, so the mask PNG must be scaled with
+ * nearest-neighbour semantics: bilinear interpolation (the canvas default)
+ * invents ids that appear in no map, and almost every pixel falls back to
+ * "Unsegmented". Vendor-prefixed variants only exist on old WebKit/Firefox/
+ * Edge; guarded rather than typed, since standard lib.dom types don't know
+ * about them.
+ */
+function disableSmoothing(ctx: AnyContext2D): void {
+  ctx.imageSmoothingEnabled = false;
+  const vendor = ctx as unknown as Record<string, boolean | undefined>;
+  for (const key of ['webkitImageSmoothingEnabled', 'mozImageSmoothingEnabled', 'msImageSmoothingEnabled']) {
+    if (key in vendor) vendor[key] = false;
+  }
+}
+
+/** Decode a mask pixel's colour into a segment id: id = (r<<16)|(g<<8)|b. */
+export function decodeSegmentId(r: number, g: number, b: number): number {
+  return (r << 16) | (g << 8) | b;
+}
+
+export interface SegmentColumns {
+  codes: Int32Array;
+  categories: string[];
+  /** Index-aligned with `categories`; NaN where the JSON carried no (or a
+   *  non-numeric) `area` for that category's id. */
+  areaByCode: Float32Array;
+}
+
+/**
+ * Pure core of segment-column construction: given one already-decoded id
+ * per pixel (from the mask PNG, via decodeSegmentId) and the parsed
+ * segments.json body, build the dictionary-encoded Segment category column
+ * ("Unsegmented" is always code 0) plus a parallel per-category area
+ * lookup. Returns null for any malformed `segmentsJson` shape — never
+ * throws. DOM/fetch-free, so this is unit tested directly; tryLoadSegments
+ * below is the thin fetch+canvas-decode wrapper around it.
+ */
+export function buildSegmentColumns(rawIds: Int32Array, segmentsJson: unknown): SegmentColumns | null {
+  if (
+    !segmentsJson ||
+    typeof segmentsJson !== 'object' ||
+    !Array.isArray((segmentsJson as { segments?: unknown }).segments)
+  ) {
+    return null;
+  }
+
+  const idToLabel = new Map<number, string>();
+  const idToArea = new Map<number, number>();
+  for (const seg of (segmentsJson as { segments: unknown[] }).segments) {
+    if (
+      seg &&
+      typeof seg === 'object' &&
+      typeof (seg as { id?: unknown }).id === 'number' &&
+      typeof (seg as { label?: unknown }).label === 'string'
+    ) {
+      const id = (seg as { id: number }).id;
+      idToLabel.set(id, (seg as { label: string }).label);
+      const area = (seg as { area?: unknown }).area;
+      if (typeof area === 'number' && Number.isFinite(area)) idToArea.set(id, area);
+    }
+  }
+
+  const categories: string[] = ['Unsegmented'];
+  const labelToCode = new Map<string, number>([['Unsegmented', 0]]);
+  const areaByCode: number[] = [NaN];
+  const codes = new Int32Array(rawIds.length);
+  for (let i = 0; i < rawIds.length; i++) {
+    const label = idToLabel.get(rawIds[i]);
+    if (label === undefined) {
+      codes[i] = 0;
+      continue;
+    }
+    let code = labelToCode.get(label);
+    if (code === undefined) {
+      code = categories.length;
+      labelToCode.set(label, code);
+      categories.push(label);
+      areaByCode.push(idToArea.get(rawIds[i]) ?? NaN);
+    }
+    codes[i] = code;
+  }
+  return { codes, categories, areaByCode: Float32Array.from(areaByCode) };
+}
+
+/**
  * Try to load an optional SAM-style segmentation mask for `image`, scaled
  * to the same w x h as the pixel columns. Returns null (never throws) if
  * either file is missing, not OK, or fails to decode as PNG/JSON — see the
- * file-level doc comment for the expected shapes.
+ * file-level doc comment for the expected shapes. All actual parsing is
+ * buildSegmentColumns above; this is just fetch + canvas decode.
  */
-async function tryLoadSegments(
-  image: PixelImage,
-  w: number,
-  h: number
-): Promise<{ codes: Int32Array; categories: string[] } | null> {
+async function tryLoadSegments(image: PixelImage, w: number, h: number): Promise<SegmentColumns | null> {
   try {
     const [pngRes, jsonRes] = await Promise.all([
       fetch(`data/${image}.segments.png`),
@@ -352,10 +440,6 @@ async function tryLoadSegments(
     if (bitmap.width < 1 || bitmap.height < 1) return null;
 
     const json: unknown = await jsonRes.json().catch(() => null);
-    if (!json || typeof json !== 'object' || !Array.isArray((json as { segments?: unknown }).segments)) {
-      bitmap.close();
-      return null;
-    }
 
     const canvas = makeCanvas(w, h);
     const ctx = get2dContext(canvas);
@@ -363,42 +447,17 @@ async function tryLoadSegments(
       bitmap.close();
       return null;
     }
+    disableSmoothing(ctx); // KNOWN DEFECT fix: bilinear id colours are garbage ids
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
     const { data } = ctx.getImageData(0, 0, w, h);
 
-    const idToLabel = new Map<number, string>();
-    for (const seg of (json as { segments: unknown[] }).segments) {
-      if (
-        seg &&
-        typeof seg === 'object' &&
-        typeof (seg as { id?: unknown }).id === 'number' &&
-        typeof (seg as { label?: unknown }).label === 'string'
-      ) {
-        idToLabel.set((seg as { id: number }).id, (seg as { label: string }).label);
-      }
-    }
-
-    const categories: string[] = ['Unsegmented'];
-    const labelToCode = new Map<string, number>([['Unsegmented', 0]]);
     const n = w * h;
-    const codes = new Int32Array(n);
+    const rawIds = new Int32Array(n);
     for (let i = 0, off = 0; i < n; i++, off += 4) {
-      const id = (data[off] << 16) | (data[off + 1] << 8) | data[off + 2];
-      const label = idToLabel.get(id);
-      if (label === undefined) {
-        codes[i] = 0;
-        continue;
-      }
-      let code = labelToCode.get(label);
-      if (code === undefined) {
-        code = categories.length;
-        labelToCode.set(label, code);
-        categories.push(label);
-      }
-      codes[i] = code;
+      rawIds[i] = decodeSegmentId(data[off], data[off + 1], data[off + 2]);
     }
-    return { codes, categories };
+    return buildSegmentColumns(rawIds, json);
   } catch {
     return null;
   }

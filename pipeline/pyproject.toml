@@ -1,0 +1,25 @@
+[project]
+name = "tessera-sam-pipeline"
+version = "0.1.0"
+description = "Offline SAM-family segmentation pipeline for Tessera pixel collections"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "ultralytics>=8.3",
+  "numpy>=1.26",
+  "pillow>=10.0",
+  "torch==2.6.0",
+  "torchvision==0.21.0",
+]
+
+# CPU-only wheels, pinned to a version the CPU index actually publishes for
+# cp312/linux — the default PyPI torch build declares CUDA (nvidia-*, cuda-*)
+# runtime deps even when unused, which is a ~2.5GB wasted download on a
+# CPU-only box. This box has no usable discrete GPU; never resolve CUDA.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
