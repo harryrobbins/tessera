@@ -89,17 +89,17 @@ export class CameraController {
     return [cam.x + (px - w / 2) / cam.zoom, cam.y - (py - h / 2) / cam.zoom];
   }
 
-  /** Frame a world-space box with padding, in device pixels. */
-  fit(b: Bounds, padPx = 48, animate = true, ms = 900) {
+  /** Frame a world-space box with padding, in device pixels. `quantise` lets a
+   *  caller round the resulting scale — a raster needs a whole number of device
+   *  pixels per cell or it point-samples into a moire. */
+  fit(b: Bounds, padPx = 48, animate = true, ms = 900, quantise?: (zoom: number) => number) {
     const w = Math.max(1, this.canvas.width - padPx * 2);
     const h = Math.max(1, this.canvas.height - padPx * 2);
     const bw = Math.max(1e-6, b.maxX - b.minX);
     const bh = Math.max(1e-6, b.maxY - b.minY);
-    const to: Camera = {
-      x: (b.minX + b.maxX) / 2,
-      y: (b.minY + b.maxY) / 2,
-      zoom: clamp(Math.min(w / bw, h / bh), this.minZoom, this.maxZoom),
-    };
+    let zoom = clamp(Math.min(w / bw, h / bh), this.minZoom, this.maxZoom);
+    if (quantise) zoom = clamp(quantise(zoom), this.minZoom, this.maxZoom);
+    const to: Camera = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2, zoom };
     this.flyTo(to, animate ? ms : 0);
   }
 

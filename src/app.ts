@@ -292,7 +292,9 @@ export class PivotApp {
 
   fit(animate = true) {
     // Land the camera at the same moment the cards do.
-    this.camera.fit(this.bounds, 72, animate, this.renderer.transitionMs);
+    const raster = this.dataset?.cards === false && this.spec.type === 'xy';
+    this.camera.fit(this.bounds, 72, animate, this.renderer.transitionMs,
+      raster ? wholePixelZoom : undefined);
     this.dirty = true;
   }
 
@@ -365,6 +367,25 @@ async function loadByKey(key: string): Promise<Dataset> {
 }
 
 export { PIXEL_IMAGES };
+
+/**
+ * Nearest whole number of device pixels per cell, chosen in log space so 1.42
+ * rounds to 2 rather than 1 — slight overflow the viewer can pan beats a picture
+ * occupying half the window. Below 1:1 it steps 1/2, 1/3, … for the same reason:
+ * a fractional scale makes each cell cover one device pixel or two, and that
+ * alternation is what reads as a grid over the image.
+ */
+export function wholePixelZoom(z: number): number {
+  if (z >= 1) {
+    const lo = Math.max(1, Math.floor(z));
+    const hi = lo + 1;
+    return Math.log(z / lo) <= Math.log(hi / z) ? lo : hi;
+  }
+  const inv = 1 / z;
+  const lo = Math.max(1, Math.floor(inv));
+  const hi = lo + 1;
+  return 1 / (Math.log(inv / lo) <= Math.log(hi / inv) ? lo : hi);
+}
 
 /** Deterministic, well-spread stagger delay in 0..1 (golden-ratio sequence). */
 function stagger(i: number): number {
