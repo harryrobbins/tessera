@@ -1,0 +1,23 @@
+{
+  "name": "tessara",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tessara — a GPU unit-visualisation engine for the browser, in the spirit of Microsoft Live Labs Pivot",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "node scripts/bench-headless.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-checker": "^0.14.5",
+    "vitest": "^3.0.0"
+  }
+}

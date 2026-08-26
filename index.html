@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tessara — GPU unit visualisation</title>
+  <link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="dot"></span>Tessara</div>
+
+      <label class="field">
+        <span>Collection</span>
+        <select id="dataset"></select>
+      </label>
+
+      <div class="seg" id="layoutSeg" role="tablist" aria-label="Layout">
+        <button data-layout="grid" class="active" role="tab" aria-selected="true">Grid</button>
+        <button data-layout="bars" role="tab" aria-selected="false">Bars</button>
+        <button data-layout="scatter" role="tab" aria-selected="false">Cross-tab</button>
+        <button data-layout="xy" role="tab" aria-selected="false">Scatter</button>
+      </div>
+
+      <label class="field" id="sortField">
+        <span>Sort by</span>
+        <select id="sortBy"></select>
+      </label>
+      <label class="field hidden" id="barField">
+        <span>Bucket by</span>
+        <select id="barBy"></select>
+      </label>
+      <label class="field hidden" id="xField">
+        <span>X</span>
+        <select id="axisX"></select>
+      </label>
+      <label class="field hidden" id="yField">
+        <span>Y</span>
+        <select id="axisY"></select>
+      </label>
+
+      <label class="field">
+        <span>Colour</span>
+        <select id="colorBy"></select>
+      </label>
+
+      <div class="spacer"></div>
+      <button id="metricsBtn" class="ghost" title="Show or hide the performance readout (M)" aria-pressed="true">Metrics</button>
+      <button id="fitBtn" class="ghost" title="Frame everything (F)">Fit</button>
+      <button id="benchBtn" class="ghost" title="Run the FPS benchmark">Benchmark</button>
+    </header>
+
+    <aside class="sidebar" id="facets" aria-label="Filters"></aside>
+
+    <main class="stage">
+      <canvas id="gl" aria-label="Card collection"></canvas>
+      <svg class="axes" id="axes" aria-hidden="true"></svg>
+      <div class="legend" id="legend"></div>
+      <div class="hud" id="hud"></div>
+      <div class="detail" id="detail" hidden></div>
+      <div class="toast" id="toast" hidden></div>
+    </main>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

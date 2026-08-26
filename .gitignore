@@ -1,0 +1,8 @@
+node_modules/
+dist/
+bench-results/*.json
+screenshots/
+*.tmp.mjs
+.env
+.idea/
+.claude/settings.local.json
