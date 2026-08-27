@@ -1,3 +1,29 @@
+# Scripts
+
+Every script here boots its own vite on its own port, drives the bundled
+Linux Chromium through Playwright (see the `playwright-wsl` skill on WSL2),
+and kills the server on exit. `--keep-server` attaches to one already running;
+`--swiftshader` forces a CPU-only, reproducible run.
+
+| Script | Port | Checks |
+|---|---|---|
+| `bench-headless.mjs` (`pnpm bench`) | 5181 | FPS per dataset size and phase, written to `bench-results/` (below) |
+| `tour-e2e.mjs` (`pnpm test:e2e`) | 5182 | every guided-tour step: caption, spotlight, app state; audio stubbed |
+| `detail-e2e.mjs` | 5195 | record modal is a dialog that makes the app inert and expands out of its card; demo action links never navigate |
+| `verify-hidpi.mjs` | 5191 | hi-res atlas tier engages at DPR 2 and 1; edges sharper than `?hires=0` |
+| `verify-card.mjs` | 5196 | flagship customer card zoomed and in a grid; two same-topic neighbours at 20,000 rows differ pixel for pixel |
+| `verify-cards.mjs` | 5197 | Cards popover (design, labels, tags, title), `?cards=`, and the canvas as a control: keyboard walk, live region, cursor chip |
+| `verify-map.mjs` | 5194 | geo collection opens on the equal-aspect map; lights brighter than `?glow=0`; zooming out resolves into points; premultiplied blend pixel-identical for cards |
+| `_verify-subpath.mjs` | 4173 (preview) | built demo boots under a `/tessera/` mount; run by the deploy workflow |
+| `generate-voiceover.mjs` (`pnpm voiceover`) | — | ElevenLabs narration clips for the tour (`--dry-run`, `--force`, `--only <id>`, `--list-voices`, `--add-voice`) |
+
+`vite.e2e.config.mjs` is the dev-server config the tour e2e uses: HMR and
+the type-checker overlay off so a concurrent edit cannot reload the page
+mid-run. It inherits the project watcher, which is an allow-list over `src/`,
+`public/` and `index.html` — several of these servers run at once, and a
+watcher that descended into `pipeline/` or `node_modules/` would exhaust
+inotify.
+
 # Benchmark runner
 
 `scripts/bench-headless.mjs` drives the app in a real Chromium (via Playwright)
