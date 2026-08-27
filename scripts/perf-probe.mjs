@@ -128,6 +128,44 @@ const FRAMES_FN = (ms) => new Promise((resolve) => {
   app.frameHooks.add(hook);
 });
 
+/**
+ * The `pnpm bench` static phase, which is where the GPU baseline's worst frames
+ * were: fit the whole collection, let the flight land, then hold still for
+ * `ticks` frames while the hi-res pass decides what to do. Reports the worst
+ * single frame — a settle that rasterises the viewport in one go shows up here
+ * as an order-of-magnitude spike over p50 and nowhere else.
+ */
+const FILL_FN = async ([key, ticks]) => {
+  const app = window.pivot;
+  await app.loadDataset(key);
+  await app.setLayout({ type: 'grid', sortBy: app.defaultSort() });
+  app.fit(false);
+  const was = app.alwaysRender;
+  app.alwaysRender = true;
+  return new Promise((resolve) => {
+    const dts = [];
+    let seen = 0;
+    const hook = (dt) => {
+      if (++seen > 4) dts.push(dt);
+      if (seen < ticks) return;
+      app.frameHooks.delete(hook);
+      app.alwaysRender = was;
+      const sorted = [...dts].sort((a, b) => a - b);
+      const hi = app.lastFrame?.hiRes;
+      resolve({
+        key,
+        cardPx: +(app.cardSize * app.camera.current.zoom).toFixed(1),
+        slot: app.lastFrame?.atlasSlot ?? null,
+        tier: hi?.tier ?? null,
+        cards: hi?.cards ?? 0,
+        p50: sorted[sorted.length >> 1],
+        worst: Math.max(...dts),
+      });
+    };
+    app.frameHooks.add(hook);
+  });
+};
+
 /** Fly to `px`-wide card `i` instantly, then record every tick until the hi-res set stops growing. */
 const HITCH_FN = async ([i, px]) => {
   const app = window.pivot;
@@ -162,8 +200,8 @@ const HITCH_FN = async ([i, px]) => {
   });
 };
 
-async function open(browser, query) {
-  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+async function open(browser, query, viewport = { width: 1920, height: 1080 }) {
+  const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.error(`[page:error] ${e}`));
   const t0 = Date.now();
@@ -180,7 +218,7 @@ async function settle(page, ms = 1500) { await page.waitForTimeout(ms); }
 async function main() {
   let vite = null;
   let browser = null;
-  const out = { label: args.label, timestamp: new Date().toISOString(), swiftshader: args.swiftshader, loads: [], solves: [], frames: [], hitches: [] };
+  const out = { label: args.label, timestamp: new Date().toISOString(), swiftshader: args.swiftshader, loads: [], solves: [], frames: [], fills: [], hitches: [] };
   try {
     if (!args['keep-server']) vite = startPreview();
     await waitForServer(60_000);
@@ -244,7 +282,23 @@ async function main() {
       }
     }
 
-    // 4. Hi-res hitch on settle: tier 1024 (one card fills the view) and tier 256 (a grid of ~70).
+    // 4. The settle hitch at the fitted view, on the two collections the GPU
+    //    baseline showed it on. Both are per-item, both fit to a card size at
+    //    or under their own base slot, and both used to re-rasterise the whole
+    //    viewport for art the atlas already held.
+    {
+      const { ctx, page } = await open(browser, 'dataset=tax-cases:900&tour=0', { width: 3608, height: 1987 });
+      for (const key of ['tax-cases:900', 'products:1000']) {
+        await settle(page, 800);
+        const f = await page.evaluate(FILL_FN, [key, 150]);
+        out.fills.push(f);
+        console.log(`fill ${f.key.padEnd(14)} card ${String(f.cardPx).padStart(5)} px, base slot ${String(f.slot).padStart(4)}, `
+          + `hi-res ${f.tier ? `tier ${f.tier}, ${f.cards} cards` : 'off'} — p50 ${f.p50.toFixed(1)} ms, worst ${f.worst.toFixed(1)} ms`);
+      }
+      await ctx.close();
+    }
+
+    // 5. Hi-res hitch on a fly-in: tier 1024 (one card fills the view) and tier 256 (a grid of ~70).
     {
       const { ctx, page } = await open(browser, 'dataset=tax-cases:900&tour=0');
       await settle(page, 1500);

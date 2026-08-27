@@ -5,6 +5,10 @@ export interface Camera { x: number; y: number; zoom: number }
 
 const STYLE_STRIDE = 16; // 4x u16 uv + 4x u8 colour + 4x u8 meta
 
+/** `?preserve=0`: drop preserveDrawingBuffer, to measure what it costs. */
+const PRESERVE_BUFFER = typeof location === 'undefined'
+  || new URLSearchParams(location.search).get('preserve') !== '0';
+
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
   const sh = gl.createShader(type)!;
   gl.shaderSource(sh, src);
@@ -65,6 +69,9 @@ export class CardRenderer {
   /** 1 = cards below the LOD band are additive points of light (the map). */
   glow = 0;
   hasAtlas = false;
+  /** True while at least one instance is pointed at the hi-res atlas. False
+   *  costs the fragment shader one texture fetch fewer on every card. */
+  hasHiRes = false;
   lastUploadMs = 0;
   gpuHint = 'unknown';
   /** Rolling GPU time for the card draw, in ms. -1 when unsupported. */
@@ -85,7 +92,15 @@ export class CardRenderer {
       // We deliberately skip frames (idle throttle, GPU pacing). Without this the
       // buffer contents are undefined on any frame we don't draw, and the
       // compositor shows that as a flicker.
-      preserveDrawingBuffer: true,
+      //
+      // It is not free: the driver keeps the backbuffer alive across the
+      // composite instead of letting it be discarded, which on a tiled or
+      // shared-memory GPU is a full-screen copy every presented frame — 7
+      // megapixels on a 4K display. `?preserve=0` turns it off so the cost can
+      // be measured against a real GPU with the Benchmark button; it is not the
+      // default because the flicker it guards against cannot be reproduced on a
+      // software rasteriser, and a flickering board is worse than a slow one.
+      preserveDrawingBuffer: PRESERVE_BUFFER,
     });
     if (!gl) throw new Error('WebGL2 is not available in this browser');
     this.gl = gl;
@@ -129,7 +144,7 @@ export class CardRenderer {
     }
     this.program = prog;
     this.u = {};
-    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_hi', 'u_texEnable', 'u_radius', 'u_edgeAA', 'u_lod', 'u_glow']) {
+    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_hi', 'u_hasHi', 'u_texEnable', 'u_radius', 'u_edgeAA', 'u_lod', 'u_glow']) {
       this.u[name] = gl.getUniformLocation(prog, name);
     }
 
@@ -299,19 +314,37 @@ export class CardRenderer {
     this.lastUploadMs = performance.now() - t0;
   }
 
-  /** Snapshot where cards are right now, then aim them at `targets`. Filtered-out
-   *  cards (alpha 0) shrink in place rather than flying to the origin. */
+  /**
+   * Snapshot where cards are right now, then aim them at `targets`. Filtered-out
+   * cards (alpha 0) shrink in place rather than flying to the origin.
+   *
+   * A landed transition needs no snapshot at all: where the cards are is
+   * exactly the `to` the GPU is already holding, so the two attribute bindings
+   * are swapped and only the new targets are shipped. That halves what a layout
+   * change costs — 32 MB to 16 MB at a million cards — and it is the common
+   * case, since a re-sort, a filter tick or a tab almost always follows a
+   * flight that has finished.
+   */
   setTargets(targets: Float32Array) {
     const t0 = performance.now();
     const gl = this.gl;
     const n = this.count;
+    const landed = this.t >= 1;
+
+    if (landed) {
+      const a = this.from; this.from = this.to; this.to = a;
+      const b = this.fromBuf; this.fromBuf = this.toBuf; this.toBuf = b;
+      gl.bindVertexArray(this.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.fromBuf);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.toBuf);
+      gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+      gl.bindVertexArray(null);
+    }
     const from = this.from;
     const to = this.to;
-    const e = easeInOutCubic(this.t);
-
-    if (this.t >= 1) {
-      from.set(to.subarray(0, n * 4));
-    } else {
+    if (!landed) {
+      const e = easeInOutCubic(this.t);
       for (let k = 0, len = n * 4; k < len; k++) from[k] = from[k] + (to[k] - from[k]) * e;
     }
     for (let i = 0; i < n; i++) {
@@ -327,8 +360,10 @@ export class CardRenderer {
       to[o + 3] = targets[o + 3];
     }
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.fromBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, from, gl.DYNAMIC_DRAW, 0, n * 4);
+    if (!landed) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.fromBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, from, gl.DYNAMIC_DRAW, 0, n * 4);
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.toBuf);
     gl.bufferData(gl.ARRAY_BUFFER, to, gl.DYNAMIC_DRAW, 0, n * 4);
     this.t = 0;
@@ -378,6 +413,7 @@ export class CardRenderer {
 
   /** Free the hi-res atlas back to its 1x1 placeholder (dataset change). */
   releaseHi() {
+    this.hasHiRes = false;
     if (this.hiSize === 0) return;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
@@ -425,6 +461,7 @@ export class CardRenderer {
     gl.uniform2f(this.u.u_res!, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.uniform1f(this.u.u_stagger!, this.stagger);
     gl.uniform1f(this.u.u_texEnable!, this.hasAtlas ? 1 : 0);
+    gl.uniform1f(this.u.u_hasHi!, this.hasHiRes ? 1 : 0);
     gl.uniform1f(this.u.u_radius!, this.cornerRadius);
     gl.uniform1f(this.u.u_edgeAA!, this.edgeAA);
     gl.uniform2f(this.u.u_lod!, this.lod[0], this.lod[1]);

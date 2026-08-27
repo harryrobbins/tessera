@@ -26,6 +26,11 @@ export class AxisOverlay {
     this.xAxis = xAxis;
     this.yAxis = yAxis;
     this.axesVersion++;
+    // The x-axis labels run along the bottom of the stage, which is also where
+    // the metrics readout sits — and the readout is opaque, so in Bars and
+    // Cross-tab it covered the name of the first bucket. Nothing else knows
+    // whether there is an axis to make room for, so say so here.
+    this.svg.parentElement?.classList.toggle('has-x-axis', Boolean(xAxis));
   }
 
   /**
@@ -65,7 +70,9 @@ export class AxisOverlay {
       const x = this.toX(t.pos, cam, cssW);
       if (x < -80 || x > cssW + 80) continue;
       const label = t.count !== undefined ? `${t.label}  ·  ${fmtCount(t.count)}` : t.label;
-      const width = label.length * 6.2;
+      // Cheap width estimate for the collision test, in step with the
+      // .axes text rule in style.css: 12.5px at weight 600.
+      const width = label.length * 7.2;
       if (x - width / 2 < lastRight + 10) continue;
       lastRight = x + width / 2;
       frag.appendChild(text(x, y + 14, label, 'middle'));
@@ -81,7 +88,7 @@ export class AxisOverlay {
     for (const t of axis.ticks) {
       const y = this.toY(t.pos, cam, cssH);
       if (y < -20 || y > cssH + 20) continue;
-      if (y > lastBottom - 16) continue;
+      if (y > lastBottom - 18) continue;
       lastBottom = y;
       frag.appendChild(text(x - 8, y + 4, t.label, 'end'));
       frag.appendChild(line(x, y, x + 5, y));

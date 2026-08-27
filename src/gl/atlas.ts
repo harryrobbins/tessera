@@ -93,18 +93,36 @@ export function slotFor(n: number, size = 4096, pad = 4, min = 64, max = 1024): 
   return Math.max(min, Math.min(max, slot));
 }
 
+/**
+ * The grid a base atlas of `slots` cards lays out in, and the canvas it needs.
+ *
+ * Square-ish, so the mip chain stays sane, but no larger than the slots it
+ * holds: what gets uploaded is the canvas, and that upload is repeated on every
+ * colour change. `slots` of 0 means "fill the texture" — the old behaviour,
+ * kept for a caller that does not know its count.
+ */
+export function atlasGrid(size: number, slot: number, pad: number, slots = 0): { cols: number; rows: number; width: number; height: number; capacity: number } {
+  const pitch = slot + pad * 2;
+  const fit = Math.max(1, Math.floor(size / pitch));
+  const cols = slots > 0 ? Math.min(fit, Math.max(1, Math.ceil(Math.sqrt(slots)))) : fit;
+  const rows = slots > 0 ? Math.min(fit, Math.ceil(slots / cols)) : fit;
+  return { cols, rows, width: cols * pitch, height: rows * pitch, capacity: cols * rows };
+}
+
 export function nextPow2(v: number): number {
   let p = 1;
   while (p < v) p <<= 1;
   return p;
 }
 
-/** Pixel origin and uv rect of slot `i` in a `cols`-wide grid of padded slots. */
-export function slotRect(i: number, size: number, slot: number, pad: number, cols: number): { x: number; y: number; uv: [number, number, number, number] } {
+/** Pixel origin and uv rect of slot `i` in a `cols`-wide grid of padded slots.
+ *  `height` differs from `width` only for the base atlas, which is cropped to
+ *  the rows it fills; the hi-res atlas is square. */
+export function slotRect(i: number, width: number, slot: number, pad: number, cols: number, height = width): { x: number; y: number; uv: [number, number, number, number] } {
   const pitch = slot + pad * 2;
   const x = (i % cols) * pitch + pad;
   const y = Math.floor(i / cols) * pitch + pad;
-  return { x, y, uv: [x / size, y / size, (x + slot) / size, (y + slot) / size] };
+  return { x, y, uv: [x / width, y / height, (x + slot) / width, (y + slot) / height] };
 }
 
 export class CardAtlas {
@@ -114,26 +132,37 @@ export class CardAtlas {
   readonly pad: number;
   readonly cols: number;
   readonly capacity: number;
-  /** Texture side in px (D-26: the owner clamps this to MAX_TEXTURE_SIZE). */
+  /** Largest texture side this atlas may use (D-26: the owner clamps this to
+   *  MAX_TEXTURE_SIZE). The canvas itself is cropped to what `slots` needs. */
   readonly size: number;
+  /** How many slots it was built to hold — part of the owner's rebuild test. */
+  readonly slots: number;
   /** The card design; swapped per dataset by `cardPainterFor`. */
   painter: CardPainter = drawCard;
   private used = 0;
 
-  constructor(size = 4096, slot = 128, pad = 4) {
+  /**
+   * `slots` crops the canvas to the grid it actually needs, which is what gets
+   * uploaded. A square 4096 texture is 64 MB and the upload is paid again on
+   * every colour change; a collection past the per-item cap fills it with a
+   * handful of group covers and used to send the other 60 MB of transparent
+   * black with them. 0 keeps the full square.
+   */
+  constructor(size = 4096, slot = 128, pad = 4, slots = 0) {
     this.size = size;
     this.slot = slot;
     this.pad = pad;
-    const pitch = slot + pad * 2;
-    this.cols = Math.floor(size / pitch);
-    this.capacity = this.cols * this.cols;
+    this.slots = slots;
+    const grid = atlasGrid(size, slot, pad, slots);
+    this.cols = grid.cols;
+    this.capacity = grid.capacity;
     this.canvas = document.createElement('canvas');
-    this.canvas.width = size;
-    this.canvas.height = size;
+    this.canvas.width = grid.width;
+    this.canvas.height = grid.height;
     const ctx = this.canvas.getContext('2d', { alpha: true, willReadFrequently: false });
     if (!ctx) throw new Error('2D context unavailable for the card atlas');
     this.ctx = ctx;
-    ctx.clearRect(0, 0, size, size);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   reset() {
@@ -164,7 +193,7 @@ export class CardAtlas {
 
   /** Pixel origin and uv rect of slot `i`. */
   rectOf(i: number) {
-    return slotRect(i, this.canvas.width, this.slot, this.pad, this.cols);
+    return slotRect(i, this.canvas.width, this.slot, this.pad, this.cols, this.canvas.height);
   }
 
   get count() { return this.used; }

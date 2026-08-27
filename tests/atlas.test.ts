@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slotFor, hiResCapacity, nextPow2, slotRect } from '../src/gl/atlas';
+import { atlasGrid, slotFor, hiResCapacity, nextPow2, slotRect } from '../src/gl/atlas';
 import { visibleCards, onScreenCards, hiResTextureSize } from '../src/gl/hires';
 
 // Only the pure sizing maths is under test: CardAtlas itself needs a Canvas2D
@@ -108,5 +108,41 @@ describe('hiResTextureSize', () => {
     expect(hiResTextureSize(3840, 2160, 16384)).toBe(4096);
     expect(hiResTextureSize(800, 600, 16384)).toBe(2048);
     expect(hiResTextureSize(3840, 2160, 2048)).toBe(2048);
+  });
+});
+
+describe('atlasGrid — the canvas the base atlas actually needs', () => {
+  it('fills the texture when the slot count is unknown', () => {
+    const g = atlasGrid(4096, 128, 4);
+    expect([g.cols, g.rows]).toEqual([30, 30]);
+    expect([g.width, g.height]).toEqual([4080, 4080]);
+  });
+
+  it('crops to a handful of group covers instead of uploading 64 MB of nothing', () => {
+    // Six categories at the 512 px cover slot: 1560x1040, not 4096 square.
+    const g = atlasGrid(4096, 512, 4, 6);
+    expect([g.cols, g.rows]).toEqual([3, 2]);
+    expect([g.width, g.height]).toEqual([1560, 1040]);
+    expect(g.width * g.height * 4).toBeLessThan(0.11 * 4096 * 4096 * 4);
+  });
+
+  it('never gives out fewer slots than it was asked for, at any size', () => {
+    for (const slots of [1, 4, 8, 900, 1000, 3000, 3136]) {
+      const slot = slotFor(slots);
+      const g = atlasGrid(4096, slot, 4, slots);
+      expect(g.capacity).toBeGreaterThanOrEqual(slots);
+      expect(g.width).toBeLessThanOrEqual(4096);
+      expect(g.height).toBeLessThanOrEqual(4096);
+    }
+  });
+
+  it('keeps a slot square once the canvas is not', () => {
+    const g = atlasGrid(4096, 512, 4, 6);
+    const r = slotRect(4, g.width, 512, 4, g.cols, g.height);
+    expect(r.x).toBe(520 + 4);
+    expect(r.y).toBe(520 + 4);
+    // The uv rect is normalised per axis, so the slot stays square on a
+    // rectangular atlas — the whole reason slotRect takes a height at all.
+    expect((r.uv[2] - r.uv[0]) * g.width).toBeCloseTo((r.uv[3] - r.uv[1]) * g.height, 6);
   });
 });

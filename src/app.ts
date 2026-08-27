@@ -3,7 +3,7 @@ import { CameraController } from './gl/camera';
 import { wholePixelZoom, stepWholePixelZoom, stepFreeZoom } from './gl/zoom';
 import { BG, CardAtlas, slotFor, hiResCapacity, slotRect, type CardSpec } from './gl/atlas';
 import { cardPainterFor, type CardPainterOptions } from './gl/cards';
-import { visibleCards, onScreenCards, planTier, planReady, hiResTextureSize, hiResKey, UNIQUE_MIN_PX } from './gl/hires';
+import { visibleCards, onScreenCards, planTier, planReady, hiResTextureSize, hiResKey, hiResWorthwhile, tierBeatsBase, rasterBudgetLeft, UNIQUE_MIN_PX } from './gl/hires';
 import { LayoutEngine, type LayoutSolution } from './layout/client';
 import { CARD_PITCH, CARD_SIZE, type LayoutSpec, type Bounds, type Axis, type LayoutData } from './layout/layouts';
 import { FrameStats } from './ui/hud';
@@ -46,15 +46,19 @@ const ATLAS_PAD = 4;
  *  answer is worth, and the cards are dots anyway (§6.1). A grid index over
  *  `renderer.to` would lift this — noted, not built. */
 const HOVER_LIMIT = 200_000;
-/**
- * Canvas2D pixels rasterised per tick: bounds the hitch on settle. A card
- * budget cannot — 24 cards is 25 Mpx at tier 1024 and 98 kpx at tier 64, two
- * orders of magnitude apart. 4 Mpx is four cards at 1024, 256 at 128, 1,024 at 64.
- */
-const HIRES_PIXEL_BUDGET = 4_194_304;
 /** Above this many style rows, one orphaned upload of the whole buffer beats
  *  a sub-range upload each (`uploadStyleAt` is 16 bytes and a GL call). */
 const STYLE_BULK = 256;
+/**
+ * Largest slot a *group cover* is painted at. `slotFor` would give a handful
+ * of covers 1024 px each, and eight of those is a 3096 px atlas; a cover is
+ * only ever on screen while the cards are too small for their own art, since
+ * anything bigger gets a hi-res raster of the row instead. The one path that
+ * can magnify a cover past this is a viewport holding more cards than the
+ * hi-res atlas has slots for, which needs 3,136 cards of 512 device px each —
+ * a 205 megapixel display.
+ */
+const COVER_SLOT = 512;
 /** The numeric ramp as RGB, parsed once rather than once per row. */
 const SEQUENTIAL_RGB = SEQUENTIAL_BLUE.map(hexToRgb);
 /** `prefers-reduced-motion`: card flights and camera fits land immediately. */
@@ -74,6 +78,11 @@ export class PivotApp {
 
   dataset: Dataset | null = null;
   datasetName = '';
+  /** The registry key the loaded collection came from — what the menu, a deep
+   *  link and the tour all name it by. `datasetName` is the human label and is
+   *  not unique across sizes; anything asking "is *this* collection loaded?"
+   *  must ask this. */
+  datasetKey = '';
   spec: LayoutSpec = { type: 'grid' };
   bounds: Bounds = { minX: -1, minY: -1, maxX: 1, maxY: 1 };
   mask: Uint8Array | null = null;
@@ -123,6 +132,13 @@ export class PivotApp {
   private hi = { tier: 0, slots: new Map<number, number>(), shown: new Set<number>(), free: [] as number[], cols: 0 };
   private hiScratch: HTMLCanvasElement | null = null;
   private hiKey = '';
+  /**
+   * The viewport scan behind the plan now filling, kept across ticks. The scan
+   * is O(n) and a budgeted fill takes tens of ticks; re-running it every one of
+   * them would put the cost it saves straight back. `key` is what it was
+   * scanned for, so it is dropped the moment the camera or the solve moves.
+   */
+  private hiPlan: { key: string; near: number[]; inView: number[]; capacity: number; wanted: number[]; wantedSet: Set<number>; fresh: boolean } | null = null;
   /** Camera as of the previous tick: a scripted camera that writes `current`
    *  directly never reports as moving, so settle is judged by stillness too. */
   private hiLastCam = { x: NaN, y: NaN, zoom: NaN };
@@ -248,6 +264,7 @@ export class PivotApp {
     if (seq !== this.loadSeq) return; // superseded while loading
     this.dataset = ds;
     this.datasetName = ds.name;
+    this.datasetKey = key;
     this.mask = null;
     // A photograph has one honest colouring: its own pixels.
     this.colorBy = ds.rgb ? TRUE_COLOUR : (firstCategorical(ds) ?? ds.facets[0] ?? '');
@@ -350,8 +367,11 @@ export class PivotApp {
     const coverField = colorCol?.kind === 'category' ? this.colorBy : this.defaultBucket();
     const ccol = ds.columns[coverField];
     const cats = ccol?.kind === 'category' ? ccol.categories : ['All'];
-    const slot = slotFor(perItem ? ds.n : cats.length, atlasSize, ATLAS_PAD);
-    if (!this.atlas || this.atlas.slot !== slot || this.atlas.size !== atlasSize) this.atlas = new CardAtlas(atlasSize, slot, ATLAS_PAD);
+    const wantSlots = perItem ? ds.n : cats.length;
+    const slot = slotFor(wantSlots, atlasSize, ATLAS_PAD, 64, perItem ? 1024 : COVER_SLOT);
+    if (!this.atlas || this.atlas.slot !== slot || this.atlas.size !== atlasSize || this.atlas.slots !== wantSlots) {
+      this.atlas = new CardAtlas(atlasSize, slot, ATLAS_PAD, wantSlots);
+    }
     const atlas = this.atlas;
     atlas.reset();
     // The accent is painted into the card, so the painter has to know what the
@@ -481,6 +501,8 @@ export class PivotApp {
     }
     this.hi = { tier: 0, slots: new Map(), shown: new Set(), free: [], cols: 0 };
     this.hiKey = '';
+    this.hiPlan = null;
+    this.renderer.hasHiRes = false;
   }
 
   /** Point a card back at its base-atlas art. The caller batches the upload
@@ -498,12 +520,17 @@ export class PivotApp {
    * Still one draw call: the fragment shader mixes the two samplers per
    * instance.
    *
-   * Two rules make it uniform rather than merely sharp. The tier is fitted to
-   * the *viewport's* capacity (`planTier`), not just to the card size, so the
-   * atlas can hold every visible card at it; and the flip is committed only
-   * once every visible card has its art, so a half-filled plan is never on
-   * screen. Both matter most where the old rule was worst — zoomed right in on
-   * a large display, where nine cards were crisp and the rest were smears.
+   * Three rules. The tier is fitted to the *viewport's* capacity (`planTier`),
+   * not just to the card size, so the atlas can hold every visible card at it;
+   * the flip is committed only once every visible card has its art, so a
+   * half-filled plan is never on screen; and nothing runs at all while the base
+   * atlas already holds this row's card at this size or better
+   * (`hiResWorthwhile`, `tierBeatsBase`). The first two make the board uniform
+   * rather than merely sharp, and matter most zoomed right in on a large
+   * display, where nine cards used to be crisp and the rest smears. The third
+   * is where the GPU baseline's 92 ms frame went: at the fitted view a 900-row
+   * collection draws 67 device px cards from a 128 px slot, and every one of
+   * them was being painted again for the same texels.
    */
   private updateHiRes(camMoving: boolean, animating: boolean) {
     const ds = this.dataset;
@@ -524,9 +551,11 @@ export class PivotApp {
     if (key === this.hiKey) return;
 
     const cardPx = this.cardSize * cam.zoom;
-    // Cheap test first: below this no card is big enough to be worth its own
-    // raster, and the scan below is the expensive part of this function.
-    if (!(cardPx >= UNIQUE_MIN_PX)) {
+    // Cheap tests first: below UNIQUE_MIN_PX no card is big enough to be worth
+    // its own raster, and on a per-item atlas nothing is worth re-rasterising
+    // until the card outgrows the slot its art is already painted at. The scan
+    // below is the expensive part of this function.
+    if (!(cardPx >= UNIQUE_MIN_PX) || !hiResWorthwhile(cardPx, this.perItem, atlas.slot)) {
       if (this.hi.slots.size) { this.clearHiRes(true); this.dirty = true; }
       this.hiKey = key;
       return;
@@ -535,11 +564,26 @@ export class PivotApp {
     const size = hiResTextureSize(this.canvas.width, this.canvas.height, r.maxTextureSize);
     // One scan, two sets: the cards on screen, which the tier has to cover,
     // and the ring just outside them, which is rasterised afterwards so a
-    // small pan does not start from nothing.
-    const near = visibleCards(r.to, r.count, cam, this.canvas.width, this.canvas.height, 0.25);
-    const inView = onScreenCards(near, r.to, cam, this.canvas.width, this.canvas.height);
+    // small pan does not start from nothing. Both are settled by `key`, so the
+    // scan happens once per plan however many ticks the fill takes.
+    let plan = this.hiPlan;
+    if (!plan || plan.key !== key) {
+      const near = visibleCards(r.to, r.count, cam, this.canvas.width, this.canvas.height, 0.25);
+      plan = {
+        key,
+        near,
+        inView: onScreenCards(near, r.to, cam, this.canvas.width, this.canvas.height),
+        capacity: -1,
+        wanted: [],
+        wantedSet: new Set(),
+        fresh: true,
+      };
+    } else {
+      plan.fresh = false;
+    }
+    const { near, inView } = plan;
     const tier = planTier(cardPx, inView.length, size, ATLAS_PAD);
-    if (tier === null) {
+    if (tier === null || !tierBeatsBase(tier, this.perItem, atlas.slot)) {
       if (this.hi.slots.size) { this.clearHiRes(true); this.dirty = true; }
       this.hiKey = key;
       return;
@@ -553,42 +597,50 @@ export class PivotApp {
       this.hi.cols = cols;
       for (let i = cols * cols - 1; i >= 0; i--) this.hi.free.push(i);
     }
+    this.hiPlan = plan;
     const hi = this.hi;
     const capacity = hi.cols * hi.cols;
     // On screen first, then the pre-load ring, up to what the atlas holds.
-    const wanted = inView.slice(0, capacity);
-    const wantedSet = new Set(wanted);
-    for (const card of near) {
-      if (wanted.length >= capacity) break;
-      if (wantedSet.has(card)) continue;
-      wanted.push(card);
-      wantedSet.add(card);
+    if (plan.capacity !== capacity) {
+      plan.capacity = capacity;
+      plan.wanted = inView.slice(0, capacity);
+      plan.wantedSet = new Set(plan.wanted);
+      for (const card of near) {
+        if (plan.wanted.length >= capacity) break;
+        if (plan.wantedSet.has(card)) continue;
+        plan.wanted.push(card);
+        plan.wantedSet.add(card);
+      }
+      plan.fresh = true;
     }
+    const { wanted, wantedSet } = plan;
     // Cards whose style bytes this tick changed, uploaded together at the end.
     const touched: number[] = [];
 
-    for (const [card, slot] of hi.slots) {
-      if (wantedSet.has(card)) continue;
-      if (hi.shown.delete(card)) { this.revertCard(card, false); touched.push(card); }
-      hi.slots.delete(card);
-      hi.free.push(slot);
+    // Only a new plan can have orphaned a slot; on the ticks that merely
+    // continue filling one there is nothing here to find.
+    if (plan.fresh) {
+      for (const [card, slot] of hi.slots) {
+        if (wantedSet.has(card)) continue;
+        if (hi.shown.delete(card)) { this.revertCard(card, false); touched.push(card); }
+        hi.slots.delete(card);
+        hi.free.push(slot);
+      }
     }
 
-    // Rasterise to a pixel budget, carrying the remainder to the next tick
-    // rather than hitching now.
-    let budget = HIRES_PIXEL_BUDGET;
+    // Rasterise to a wall-clock budget, carrying the remainder to the next
+    // tick rather than hitching now.
+    const t0 = performance.now();
     let rastered = 0;
     for (const card of wanted) {
       if (hi.slots.has(card)) continue;
-      if (hi.free.length === 0 || budget < tier * tier) break;
-      budget -= tier * tier;
+      if (hi.free.length === 0 || !rasterBudgetLeft(rastered, performance.now() - t0)) break;
       const slot = hi.free.pop()!;
       const rect = slotRect(slot, size, tier, ATLAS_PAD, hi.cols);
       r.setHiSlot(rect.x - ATLAS_PAD, rect.y - ATLAS_PAD, this.rasterise(this.specOf(card), tier));
       hi.slots.set(card, slot);
       rastered++;
     }
-    if (rastered) r.finishHi();
 
     // Commit: every card *on screen* has art, so flip together — including
     // any of the pre-load ring that is ready, which costs nothing to show.
@@ -606,11 +658,17 @@ export class PivotApp {
     // Stop scanning only once the ring is done too, so it fills across ticks.
     if (planReady(wanted, hi.slots)) this.hiKey = key;
 
+    // The mip chain covers the whole texture, so rebuilding it per raster tick
+    // would hand back what the budget just saved. Slots that have not been
+    // flipped yet are sampled by nothing, so the only moment mips have to be
+    // current is the one where art becomes visible.
     if (touched.length) {
+      r.hasHiRes = hi.shown.size > 0;
+      r.finishHi();
       if (touched.length > STYLE_BULK) r.uploadStyle();
       else for (const card of touched) r.uploadStyleAt(card);
+      this.dirty = true;
     }
-    if (touched.length || rastered) this.dirty = true;
   }
 
   /** Draw one card, with its bleed, at `tier` px into the scratch canvas. */
@@ -663,6 +721,31 @@ export class PivotApp {
   async setMask(mask: Uint8Array | null) {
     this.mask = mask;
     await this.setLayout(this.spec);
+    // A filter re-solves the layout, and every layout is sized by what it has
+    // to place: 3,000 cards make a board sixteen times wider than 12 do. The
+    // camera stays where it was, so without this a filter can leave the
+    // viewport on empty space and read as "my filter deleted the data".
+    // Only when there is nothing left to look at from here — panning and
+    // zooming a filtered board the viewer can still see is theirs to do.
+    if (this.layoutOffView()) this.fit();
+  }
+
+  /** How small the whole layout may get on screen before a filter has, in
+   *  effect, emptied the viewport: 15 % of it in *both* axes. */
+  private static readonly SPECK = 0.15;
+
+  /** True when the layout, as solved, is off screen or too small to read. */
+  private layoutOffView(): boolean {
+    const b = this.bounds;
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    if (!(w > 0) || !(h > 0)) return false; // nothing to frame; fit() would bail anyway
+    const cam = this.camera.target;
+    const halfW = this.canvas.width / 2 / cam.zoom;
+    const halfH = this.canvas.height / 2 / cam.zoom;
+    if (b.maxX < cam.x - halfW || b.minX > cam.x + halfW) return true;
+    if (b.maxY < cam.y - halfH || b.minY > cam.y + halfH) return true;
+    return w / (halfW * 2) < PivotApp.SPECK && h / (halfH * 2) < PivotApp.SPECK;
   }
 
   /** True for an equal-aspect longitude x latitude scatter — the night-lights map. */

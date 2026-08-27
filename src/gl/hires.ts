@@ -115,3 +115,51 @@ export function hiResTextureSize(bufW: number, bufH: number, maxTex: number): nu
 export function hiResKey(cam: Camera, w: number, h: number, solveSeq: number): string {
   return `${cam.x},${cam.y},${cam.zoom},${w},${h},${solveSeq}`;
 }
+
+/**
+ * Whether a hi-res plan can add anything the base atlas has not already got.
+ *
+ * Above the per-item cap the base atlas holds group covers, so a row's own
+ * record only ever exists here — the pass always earns its keep. Below it the
+ * base atlas already holds *this row's card*, painted at `baseSlot` px; at or
+ * under that size on screen, re-rasterising the whole viewport spends a
+ * hundred milliseconds of Canvas2D to arrive at the texels it started with.
+ * That was the 92 ms frame in the GPU baseline: 900 cards fitted to a 3608 px
+ * canvas are 67 device px against a 128 px base slot.
+ */
+export function hiResWorthwhile(cardPx: number, perItem: boolean, baseSlot: number): boolean {
+  return !perItem || cardPx > baseSlot;
+}
+
+/**
+ * Whether a plan at `tier` beats the art already in the base atlas.
+ *
+ * `hiResWorthwhile` asks the same question of the card's on-screen size, which
+ * is the cheap test that skips the viewport scan; this one asks it of the tier
+ * the scan actually settled on, and the two can disagree. `planTier` steps down
+ * until the whole viewport fits, so a thousand 65 px cards on a large display
+ * come back as tier 64 — a re-raster of every row at exactly the resolution its
+ * base slot already holds.
+ */
+export function tierBeatsBase(tier: number, perItem: boolean, baseSlot: number): boolean {
+  return !perItem || tier > baseSlot;
+}
+
+/**
+ * Wall-clock milliseconds one settle tick may spend painting cards.
+ *
+ * A pixel budget cannot bound this. A card's cost is dominated by shaping and
+ * drawing its text, which barely moves with the slot size, so the 4 Mpx budget
+ * this replaced was 256 cards at tier 128 and four at tier 1024 — two orders
+ * of magnitude apart in pixels, but 256 cards is a 92 ms frame either way.
+ */
+export const HIRES_MS_BUDGET = 5;
+
+/**
+ * Whether the raster loop may paint another card this tick. Always the first,
+ * so a tier whose single card costs more than the whole budget still makes
+ * progress; never one that would start after the budget is already spent.
+ */
+export function rasterBudgetLeft(painted: number, elapsedMs: number, budgetMs = HIRES_MS_BUDGET): boolean {
+  return painted === 0 || elapsedMs < budgetMs;
+}

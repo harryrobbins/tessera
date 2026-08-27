@@ -4,6 +4,7 @@ import type { LayoutSpec } from '../layout/layouts';
 import type { TourStep, SpotRect } from './engine';
 import { NARRATION } from './script';
 import { COL, TOUR_DATASET, VAL } from './columns';
+import { FLIP_MS } from '../ui/detail/flip';
 
 /** What the tour may do to the app — built in main.ts, the only DOM-aware side. */
 export interface TourHost {
@@ -20,6 +21,10 @@ export interface TourHost {
   /** Put Card settings back to the collection's own choices for the tour.
    *  Optional so the fakes in tests/tour-*.test.ts keep compiling. */
   resetCardSettings?(): void;
+  /** Cancel a running benchmark suite and take down its report. The suite
+   *  swaps the collection four times and drives the camera every frame, so
+   *  the tour and it cannot share the app. Optional for the same reason. */
+  stopBenchmark?(): void;
 }
 
 /** Resolves after `ms`, or at once when `signal` aborts (the user moved on). */
@@ -149,9 +154,18 @@ export function buildSteps(host: TourHost): TourStep[] {
     await sleep(t, signal);
     await settle(host.app, 3000, signal);
   };
+  /**
+   * The tour narrates one collection, so it loads it. The menu is not the
+   * authority on what is on screen — a benchmark run swaps the collection
+   * without touching the menu — so this asks the app itself, and reloads
+   * whenever the answer is anything but the tour's own collection.
+   */
   const ensureDataset = async (signal: AbortSignal) => {
-    const sel = host.el('#dataset') as HTMLSelectElement | null;
-    if (sel?.value !== TOUR_DATASET && live(signal)) await host.loadDataset(TOUR_DATASET);
+    if (host.app.datasetKey !== TOUR_DATASET && live(signal)) await host.loadDataset(TOUR_DATASET);
+  };
+  /** Close the record modal if it is open: it makes `#app` inert. */
+  const closeRecord = () => {
+    host.el('#detail .close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   };
   const toMap = async (signal: AbortSignal) => {
     if (!live(signal)) return;
@@ -167,6 +181,9 @@ export function buildSteps(host: TourHost): TourStep[] {
       target: '#dataset',
       minMs: 1200,
       run: async (signal) => {
+        // Nothing else may be driving the app while the tour narrates it.
+        host.stopBenchmark?.();
+        closeRecord();
         await ensureDataset(signal);
         if (!live(signal)) return;
         // The tour asserts a specific look; a returning viewer's saved "labels
@@ -204,9 +221,14 @@ export function buildSteps(host: TourHost): TourStep[] {
       },
     },
     scatter: {
-      target: layoutBtn('xy'),
+      // Two thousand cards at their raw (hours, satisfaction) coordinates pile
+      // into five smeared bands — satisfaction is an integer 1-5 and the hours
+      // are heavily skewed — so this is the same pair of columns as a cross-tab,
+      // where every card stays a card. The axis menus are what changes between
+      // this step and the last, so they are what the spotlight follows.
+      target: '#xField',
       run: async (signal) => {
-        await host.setLayout('xy');
+        await host.setLayout('scatter');
         if (has(COL.hours) && live(signal)) await host.setSelect('axisX', COL.hours);
         if (has(COL.satisfaction) && live(signal)) await host.setSelect('axisY', COL.satisfaction);
         if (live(signal)) host.app.fit();
@@ -214,7 +236,16 @@ export function buildSteps(host: TourHost): TourStep[] {
     },
     facet: {
       target: facetRow(COL.channel, VAL.post),
-      run: () => tick(COL.channel, VAL.post),
+      // Off the resolution-hours cross-tab first. The next step filters down
+      // to twelve *open* cases, and an open case has neither a resolution time
+      // nor a satisfaction score — on those axes the board would go honestly,
+      // uselessly blank. Bars by Channel is where "one in ten arrives by post"
+      // was claimed three steps ago, so it is where the paper trail shows.
+      run: async (signal) => {
+        await host.setLayout('bars');
+        if (has(COL.channel) && live(signal)) await host.setSelect('barBy', COL.channel);
+        if (live(signal)) tick(COL.channel, VAL.post);
+      },
     },
     facet2: {
       target: facetRow(COL.status, VAL.open),
@@ -268,17 +299,26 @@ export function buildSteps(host: TourHost): TourStep[] {
         const ds = host.app.dataset;
         if (!ds || !live(signal)) return;
         const i = featuredRow(ds, host.app.mask);
-        if (i >= 0) host.select(i);
+        if (i < 0) return;
+        host.select(i);
+        // The modal expands out of the card (a FLIP transform). Measuring the
+        // action link mid-flight spotlights a shrunken rectangle of empty
+        // dialog, so wait for the expansion to land before the caption asks
+        // where it is.
+        await sleep(tween(FLIP_MS + 120), signal);
       },
     },
     clear: {
-      target: () => visible(host, '#facets [data-clear]') ?? host.el('#facets'),
+      // Not the clear link: the action removes it, so by the time the caption
+      // is up the spotlight would fall back to the whole 900-pixel sidebar.
+      // The Channel facet is where the counts visibly go back to full.
+      target: () => host.el(`#facets .facet[data-field="${css(COL.channel)}"]`) ?? host.el('#facets'),
       minMs: 1200,
       // The record modal is still open from the previous step, and it makes
       // the whole app inert: spotlighting a control the viewer could not click
       // would be a lie. It reads better with the modal gone anyway.
       run: () => {
-        host.el('#detail .close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        closeRecord();
         host.clearFacets();
       },
     },

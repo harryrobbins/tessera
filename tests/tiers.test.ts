@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planTier, UNIQUE_MIN_PX } from '../src/gl/hires';
+import { HIRES_MS_BUDGET, hiResWorthwhile, planTier, rasterBudgetLeft, tierBeatsBase, UNIQUE_MIN_PX } from '../src/gl/hires';
 import { hiResCapacity } from '../src/gl/atlas';
 
 /** Cards of `px` device pixels that fit a 3840x2160 drawing buffer. */
@@ -90,5 +90,52 @@ describe('planTier — the capacity-fitted hi-res tier (I-1.3)', () => {
     }
     // Past the 1024 ceiling the card is upscaled rather than the texture grown.
     expect(planTier(4000, 1, 4096)).toBe(1024);
+  });
+});
+
+describe('hiResWorthwhile / tierBeatsBase — not re-painting what the base atlas has', () => {
+  it('always earns its keep above the per-item cap, where the base atlas holds covers', () => {
+    expect(hiResWorthwhile(48, false, 1024)).toBe(true);
+    expect(tierBeatsBase(64, false, 512)).toBe(true);
+  });
+
+  it('is off while a per-item card is drawn no larger than its own base slot', () => {
+    // The GPU baseline's 92 ms frame: 900 cards fitted to a 3608 px canvas are
+    // 67 device px, and the base atlas already holds each of them at 128.
+    expect(hiResWorthwhile(67, true, 128)).toBe(false);
+    expect(hiResWorthwhile(128, true, 128)).toBe(false);
+    expect(hiResWorthwhile(129, true, 128)).toBe(true);
+  });
+
+  it('is off again when the tier the scan settles on is no better than the slot', () => {
+    // 1,000 cards at 65 px want tier 128, which a 4096 texture holds only 900
+    // of, so planTier steps down to 64 — exactly the base slot, and a thousand
+    // re-rasters for no texel.
+    expect(planTier(65, 1000, 4096)).toBe(64);
+    expect(tierBeatsBase(64, true, 64)).toBe(false);
+    expect(tierBeatsBase(128, true, 64)).toBe(true);
+  });
+});
+
+describe('rasterBudgetLeft — the settle tick budget', () => {
+  it('always paints one card, however long that card takes', () => {
+    expect(rasterBudgetLeft(0, 900)).toBe(true);
+  });
+
+  it('stops once the budget is spent, and keeps going while it is not', () => {
+    expect(rasterBudgetLeft(1, HIRES_MS_BUDGET - 0.5)).toBe(true);
+    expect(rasterBudgetLeft(1, HIRES_MS_BUDGET)).toBe(false);
+    expect(rasterBudgetLeft(240, HIRES_MS_BUDGET + 40)).toBe(false);
+  });
+
+  it('bounds the tick whatever the tier costs per card, which a pixel budget could not', () => {
+    // 4 Mpx was 256 cards at tier 128 and four at tier 1024; the cost of a card
+    // is its text, not its area, so those two ticks were nothing alike.
+    for (const perCard of [0.05, 0.4, 3.5, 17]) {
+      let painted = 0;
+      let elapsed = 0;
+      while (rasterBudgetLeft(painted, elapsed)) { painted++; elapsed += perCard; }
+      expect(elapsed).toBeLessThan(HIRES_MS_BUDGET + perCard);
+    }
   });
 });

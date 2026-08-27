@@ -51,13 +51,15 @@ function phase(
   name: string,
   durationMs: number,
   drive?: (progress: number, dtMs: number) => void,
+  signal?: AbortSignal,
 ): Promise<PhaseResult> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const stats = new FrameStats(8192);
     const gpu = new FrameStats(8192);
     let elapsed = 0;
     let seen = 0;
     const hook = (dt: number) => {
+      if (signal?.aborted) { app.frameHooks.delete(hook); reject(new BenchCancelled()); return; }
       seen++;
       elapsed += dt;
       drive?.(Math.min(1, elapsed / durationMs), dt);
@@ -84,6 +86,11 @@ function phase(
   });
 }
 
+/** Thrown by `runBench` when the caller cancels the suite mid-run. */
+export class BenchCancelled extends Error {
+  constructor() { super('benchmark cancelled'); this.name = 'BenchCancelled'; }
+}
+
 export interface BenchOptions {
   sizes?: number[];
   /** Include the small (900-card, per-row atlas) tax-cases target. */
@@ -91,6 +98,14 @@ export interface BenchOptions {
   /** Per-phase duration. Shorter runs are noisier; 2s is the floor worth trusting. */
   phaseMs?: number;
   onProgress?: (msg: string) => void;
+  /**
+   * Abort the suite. A run owns the whole app — it swaps the collection out
+   * from under the UI four times — so anything else that wants to drive the
+   * app (the guided tour) has to be able to stop it. Checked between phases
+   * and targets, and inside a phase's frame hook, so a cancel lands within a
+   * frame rather than at the end of a two-second window.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -101,6 +116,8 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
   const sizes = opts.sizes ?? [1000, 10_000, 100_000, 500_000, 1_000_000];
   const phaseMs = opts.phaseMs ?? 2200;
   const runs: RunResult[] = [];
+  const signal = opts.signal;
+  const stop = () => { if (signal?.aborted) throw new BenchCancelled(); };
   const wasContinuous = app.alwaysRender;
   app.alwaysRender = true;
 
@@ -110,8 +127,10 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
 
   try {
     for (const target of targets) {
+      stop();
       opts.onProgress?.(`loading ${target.key}`);
       await app.loadDataset(target.key);
+      stop();
       await app.setLayout({ type: 'grid', sortBy: app.defaultSort() });
       app.fit(false);
       await settle(app);
@@ -119,11 +138,11 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
       const solve: Record<string, number> = {};
       const phases: PhaseResult[] = [];
 
-      phases.push(await phase(app, 'static', phaseMs));
+      phases.push(await phase(app, 'static', phaseMs, undefined, signal));
 
       // Layout morphs: the expensive path — CPU re-solve, 32MB of buffer upload,
       // then every card in flight at once.
-      const morph = await phase(app, 'morph', phaseMs * 2, morphDriver(app, solve));
+      const morph = await phase(app, 'morph', phaseMs * 2, morphDriver(app, solve), signal);
       phases.push(morph);
 
       await app.setLayout({ type: 'grid', sortBy: app.defaultSort() });
@@ -138,7 +157,7 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
         cam.target.y = home.y + Math.sin(p * Math.PI * 4) * span * 0.6;
         cam.current.x = cam.target.x;
         cam.current.y = cam.target.y;
-      }));
+      }, signal));
       cam.target = { ...home };
       cam.current = { ...home };
 
@@ -146,7 +165,7 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
         const k = Math.exp(Math.sin(p * Math.PI * 2) * 2.2);
         cam.target.zoom = home.zoom * k;
         cam.current.zoom = cam.target.zoom;
-      }));
+      }, signal));
       cam.target = { ...home };
       cam.current = { ...home };
 

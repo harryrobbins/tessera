@@ -720,3 +720,214 @@ describe('xyLayout raster (D-01)', () => {
     expect(none.bounds.maxX).toBeGreaterThan(none.bounds.minX);
   });
 });
+
+describe('rank bins: a skewed numeric axis in a cross-tab', () => {
+  /** 0.1 to 240 with three quarters of the mass under a day — resolution hours. */
+  function skewed(n = 400): LayoutData {
+    const rnd = mulberry32(7);
+    const v: number[] = [];
+    for (let i = 0; i < n; i++) v.push(i < n * 0.78 ? 0.1 + rnd() * 2 : 20 + rnd() * 220);
+    return { n, columns: { h: numCol('h', v) } };
+  }
+
+  it('leaves equal-width bins alone: they are what a bar height means', () => {
+    const data = skewed();
+    const even = bucketize(data, 'h', 10);
+    const counts = new Array(10).fill(0);
+    for (const c of even.codes) counts[c]++;
+    expect(counts[0] / data.n).toBeGreaterThan(0.5);       // the collapse this exists to detect
+    expect(bucketize(data, 'h', 10, 'even')).toEqual(even); // 'even' is the default
+  });
+
+  it('spreads a skewed column across its bins when asked to rank', () => {
+    const data = skewed();
+    const { codes, labels } = bucketize(data, 'h', 10, 'rank');
+    const counts = new Array(labels.length).fill(0);
+    for (const c of codes) counts[c]++;
+    expect(labels.length).toBeGreaterThan(2);
+    // Equal-count, to within the ties at the low end.
+    for (const c of counts) expect(c).toBeLessThan(data.n * 0.3);
+    // The labels are the cuts that were actually made, in order.
+    const cuts = labels.map(Number);
+    for (let i = 1; i < cuts.length; i++) expect(cuts[i]).toBeGreaterThan(cuts[i - 1]);
+  });
+
+  it('leaves an evenly spread column on equal-width bins', () => {
+    const v: number[] = [];
+    for (let i = 0; i < 400; i++) v.push(i / 4);
+    const data: LayoutData = { n: 400, columns: { v: numCol('v', v) } };
+    expect(bucketize(data, 'v', 10, 'rank')).toEqual(bucketize(data, 'v', 10));
+  });
+
+  it('keeps equal width when the column cannot carry the cuts', () => {
+    // 90 % one value: every quantile edge lands on it, so there is nothing to cut.
+    const v = new Array(200).fill(5);
+    for (let i = 0; i < 20; i++) v[i] = 5 + i;
+    const data: LayoutData = { n: 200, columns: { v: numCol('v', v) } };
+    expect(bucketize(data, 'v', 10, 'rank')).toEqual(bucketize(data, 'v', 10));
+  });
+
+  it('a cross-tab ranks its axes, so a skewed one is not one column of ten', () => {
+    const data = skewed();
+    data.columns.y = numCol('y', Array.from({ length: data.n }, (_, i) => (i % 5) + 1));
+    const sol = scatterLayout(data, { type: 'scatter', x: 'h', y: 'y', xBins: 10, yBins: 8 });
+    const cols = new Set<number>();
+    for (let i = 0; i < data.n; i++) cols.add(Math.round(sol.positions[i * 4] * 100));
+    expect(sol.xAxis!.ticks.length).toBeGreaterThan(2);
+    expect(cols.size).toBeGreaterThan(3);
+  });
+});
+
+describe('a filter must not rescale a raw scatter (the plot is the collection)', () => {
+  function points(n: number): LayoutData {
+    const rnd = mulberry32(11);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let i = 0; i < n; i++) { xs.push(rnd() * 100); ys.push(rnd() * 40); }
+    return { n, columns: { x: numCol('x', xs), y: numCol('y', ys) } };
+  }
+
+  it('keeps the same bounds and the same card positions under a mask', () => {
+    const data = points(500);
+    const mask = new Uint8Array(500);
+    for (let i = 0; i < 500; i += 40) mask[i] = 1;
+    const all = xyLayout(data, { type: 'xy', x: 'x', y: 'y' });
+    const some = xyLayout(data, { type: 'xy', x: 'x', y: 'y' }, mask);
+    expect(some.bounds).toEqual(all.bounds);
+    expect(some.visible).toBe(13);
+    for (let i = 0; i < 500; i++) {
+      if (!mask[i]) continue;
+      expect(some.positions[i * 4]).toBeCloseTo(all.positions[i * 4], 5);
+      expect(some.positions[i * 4 + 1]).toBeCloseTo(all.positions[i * 4 + 1], 5);
+    }
+  });
+});
+
+describe('barsLayout frames the bars that have cards', () => {
+  const data: LayoutData = {
+    n: 8,
+    columns: { c: catCol('c', ['a', 'b', 'c', 'd'], [0, 0, 1, 1, 2, 2, 3, 3]) },
+  };
+
+  it('spans every bucket when they all hold cards', () => {
+    const sol = barsLayout(data, { type: 'bars', by: 'c' });
+    expect(sol.bounds.minX).toBeLessThan(sol.xAxis!.ticks[0].pos);
+    expect(sol.bounds.maxX).toBeGreaterThan(sol.xAxis!.ticks[3].pos);
+  });
+
+  it('trims the empty buckets a filter leaves at the ends', () => {
+    const mask = Uint8Array.from([0, 0, 0, 0, 0, 0, 1, 1]); // only "d" survives
+    const sol = barsLayout(data, { type: 'bars', by: 'c' }, mask);
+    const d = sol.xAxis!.ticks[3].pos;
+    expect(sol.bounds.minX).toBeLessThanOrEqual(d);
+    expect(sol.bounds.maxX).toBeGreaterThanOrEqual(d);
+    // The three empty buckets to the left are no longer framed…
+    expect(sol.bounds.minX).toBeGreaterThan(sol.xAxis!.ticks[2].pos);
+    // …but they keep their place on the axis.
+    expect(sol.xAxis!.ticks).toHaveLength(4);
+    expect(sol.xAxis!.ticks[0].count).toBe(0);
+  });
+});
+
+describe('the solve memo (G)', () => {
+  // A collection is loaded into the worker once and then solved over and over
+  // against different masks. The sorted order and the bin edges are functions
+  // of the columns alone, so they are cached per collection; these are the
+  // properties that caching must not break.
+
+  function sortable(n: number, seed = 9): LayoutData {
+    const rnd = mulberry32(seed);
+    const key = Array.from({ length: n }, () => randInt(rnd, 50));
+    const cat = Array.from({ length: n }, () => randInt(rnd, 4));
+    return { n, columns: { key: numCol('key', key), cat: catCol('cat', ['a', 'b', 'c', 'd'], cat) } };
+  }
+
+  /** Visible rows in reading order — what the grid actually drew. */
+  function reading(res: ReturnType<typeof gridLayout>, n: number): number[] {
+    const rows: Array<{ i: number; x: number; y: number }> = [];
+    for (let i = 0; i < n; i++) {
+      if (res.positions[i * 4 + 3] === 0) continue;
+      rows.push({ i, x: res.positions[i * 4], y: res.positions[i * 4 + 1] });
+    }
+    rows.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+    return rows.map((r) => r.i);
+  }
+
+  it('gives a masked solve the order it would have had on its own', () => {
+    // Filtering the whole collection's sorted order is only the same answer if
+    // dropping rows leaves both the ordering and the tie-break intact.
+    const n = 400;
+    const data = sortable(n);
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = i % 3 === 0 ? 1 : 0;
+
+    const fresh = sortable(n); // same numbers, no cache behind it
+    const masked = reading(gridLayout(data, { type: 'grid', sortBy: 'key' }, mask), n);
+    const alone = reading(gridLayout(fresh, { type: 'grid', sortBy: 'key' }, mask), n);
+    expect(masked).toEqual(alone);
+
+    const keys = data.columns.key as LayoutColumnNumber;
+    for (let k = 1; k < masked.length; k++) {
+      expect(keys.values[masked[k - 1]]).toBeLessThanOrEqual(keys.values[masked[k]]);
+      // Stable: equal keys keep dataset order.
+      if (keys.values[masked[k - 1]] === keys.values[masked[k]]) expect(masked[k - 1]).toBeLessThan(masked[k]);
+    }
+  });
+
+  it('is unmoved by how many solves came before it, or in what order', () => {
+    const n = 300;
+    const data = sortable(n, 3);
+    const a = new Uint8Array(n).fill(1);
+    const b = new Uint8Array(n);
+    for (let i = 0; i < n; i++) b[i] = i < 100 ? 1 : 0;
+
+    const first = gridLayout(data, { type: 'grid', sortBy: 'cat' }, b).positions;
+    for (const mask of [a, null, b, a, null]) gridLayout(data, { type: 'grid', sortBy: 'cat' }, mask);
+    // Interleave another column's sort, and the bins, to evict and refill.
+    gridLayout(data, { type: 'grid', sortBy: 'key' }, a);
+    barsLayout(data, { type: 'bars', by: 'cat' }, a);
+    scatterLayout(data, { type: 'scatter', x: 'cat', y: 'key' }, a);
+    expect(gridLayout(data, { type: 'grid', sortBy: 'cat' }, b).positions).toEqual(first);
+  });
+
+  it("keeps one collection's bins out of another's", () => {
+    const one: LayoutData = { n: 4, columns: { v: numCol('v', [0, 10, 20, 30]) } };
+    const two: LayoutData = { n: 4, columns: { v: numCol('v', [0, 1000, 2000, 3000]) } };
+    expect(bucketize(one, 'v', 4).labels).not.toEqual(bucketize(two, 'v', 4).labels);
+    expect(bucketize(one, 'v', 4).labels).toEqual(bucketize(one, 'v', 4).labels);
+    // And the bin count is part of what is remembered, not just the column.
+    expect(bucketize(one, 'v', 4).labels.length).toBe(4);
+    expect(bucketize(one, 'v', 8).labels.length).toBe(8);
+  });
+
+  it('still throws for a column it cannot bucket, however often it is asked', () => {
+    const data: LayoutData = {
+      n: 2,
+      columns: { t: { kind: 'text', name: 't', values: ['a', 'b'] } },
+    };
+    for (let k = 0; k < 3; k++) {
+      expect(() => bucketize(data, 't', 4)).toThrow();
+      expect(() => bucketize(data, 'nope', 4)).toThrow();
+    }
+  });
+
+  it('counts the visible rows of a raster the same way the index list did', () => {
+    // xyLayout walks the rows directly now rather than building an identity
+    // array; `visible` still means "masked in", non-finite coordinates and all.
+    const n = 9;
+    const data: LayoutData = {
+      n,
+      columns: {
+        x: numCol('x', [0, 1, 2, 0, 1, 2, 0, 1, NaN]),
+        y: numCol('y', [0, 0, 0, 1, 1, 1, 2, 2, 2]),
+      },
+    };
+    expect(xyLayout(data, { type: 'xy', x: 'x', y: 'y' }, null).visible).toBe(n);
+    const mask = Uint8Array.from([1, 1, 1, 0, 0, 0, 1, 1, 1]);
+    const res = xyLayout(data, { type: 'xy', x: 'x', y: 'y' }, mask);
+    expect(res.visible).toBe(6);
+    for (const i of [3, 4, 5]) expect(res.positions[i * 4 + 3]).toBe(0);
+    expect(res.positions[8 * 4 + 3]).toBe(0); // masked in, but has no coordinates
+    expect(res.positions[0 * 4 + 3]).toBe(1);
+  });
+});

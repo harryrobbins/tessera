@@ -8,7 +8,7 @@ import { CardSettingsPanel, loadSettings, type CardSettings } from './ui/setting
 import { customCardFor } from './gl/cards';
 import { cardTextOf, compileCard, type CardModel } from './gl/cards/model';
 import { taxCaseDetail } from './ui/detail/taxCase';
-import { runBench, type BenchResult } from './bench/bench';
+import { runBench, BenchCancelled, type BenchResult } from './bench/bench';
 import { fieldColors, hasNamedColors, OTHER } from './core/palette';
 import { esc } from './core/esc';
 import type { LayoutSpec } from './layout/layouts';
@@ -396,6 +396,7 @@ const tourHost: TourHost & { tweenMs(ms: number): number } = {
   clearFacets: () => facets.clearAll(),
   select: (i) => app.onSelect?.(i),
   el: (selector) => document.querySelector(selector),
+  stopBenchmark,
   resetCardSettings: () => cardPanel.reset(),
   tweenMs,
 };
@@ -525,10 +526,37 @@ function reportTable(result: BenchResult): string {
     </div>`;
 }
 
+/**
+ * The benchmark owns the whole application while it runs: it swaps the
+ * collection four times and drives the camera every frame. Only one may run,
+ * and anything else that wants the app — the guided tour — stops it first.
+ */
+let benchRun: AbortController | null = null;
+
+/** Cancel a running suite and take down its report. Safe to call when idle. */
+function stopBenchmark(): void {
+  benchRun?.abort();
+  benchRun = null;
+  document.querySelector('.report')?.remove();
+}
+
 async function benchmark() {
+  if (benchRun) { toast('A benchmark is already running'); return undefined; }
   const sizes = (params.get('sizes')?.split(',').map(Number).filter(Boolean)) ?? [1000, 10_000, 100_000, 500_000];
+  const run = new AbortController();
+  benchRun = run;
+  $('benchBtn').setAttribute('aria-busy', 'true');
   toast('Benchmarking… the window must stay in the foreground', 6000);
-  const result = await runBench(app, { sizes, onProgress: (m) => toast(m, 4000) });
+  let result: BenchResult;
+  try {
+    result = await runBench(app, { sizes, signal: run.signal, onProgress: (m) => toast(m, 4000) });
+  } catch (err) {
+    if (err instanceof BenchCancelled) { toast('Benchmark stopped'); return undefined; }
+    throw err;
+  } finally {
+    $('benchBtn').removeAttribute('aria-busy');
+    if (benchRun === run) benchRun = null;
+  }
   const panel = document.createElement('div');
   panel.className = 'report';
   panel.innerHTML = reportTable(result);

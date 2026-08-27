@@ -96,9 +96,14 @@ const expectations = {
   bars: (s) => s.spec === 'bars' && s.barBy === COL.channel,
   area: (s) => s.spec === 'bars' && s.barBy === COL.areaType,
   crosstab: (s) => s.spec === 'scatter' && s.axisX === COL.ageBand && s.axisY === COL.channel,
-  scatter: (s) => s.spec === 'xy' && s.axisX === COL.hours && s.axisY === COL.satisfaction,
-  facet: (s) => s.facetChecked.includes(`${COL.channel}=${VAL.post}`) && s.masked > 250 && s.masked < 350,
-  facet2: (s) => s.facetChecked.length === 3 && s.masked === 12,
+  // A cross-tab, not a raw scatter: at these two columns a raw scatter smears
+  // the cards into five overlapping bands (see src/tour/actions.ts).
+  scatter: (s) => s.spec === 'scatter' && s.axisX === COL.hours && s.axisY === COL.satisfaction,
+  // Bars by Channel, not whatever the previous step left: the next step's
+  // twelve open cases have no resolution time and no satisfaction score.
+  facet: (s) => s.spec === 'bars' && s.barBy === COL.channel
+    && s.facetChecked.includes(`${COL.channel}=${VAL.post}`) && s.masked > 250 && s.masked < 350,
+  facet2: (s) => s.spec === 'bars' && s.facetChecked.length === 3 && s.masked === 12,
   grid: (s) => s.spec === 'grid' && s.sortBy === COL.contacts && s.colorBy === COL.contacts,
   zoom: (s, prev) => s.zoom > prev.zoom,
   // The record step flies to the card and leaves it visible; the modal — which
@@ -237,6 +242,55 @@ async function autoPass(browser) {
   await b.ctx.close();
 }
 
+/**
+ * The tour has to be able to take the application off whatever else is driving
+ * it. A benchmark run swaps the collection four times without touching the
+ * menu, so a tour that trusts the menu narrates one collection over another's
+ * data and every facet it ticks silently misses.
+ */
+async function benchTakeoverPass(browser) {
+  console.log('\n[pass 4] the tour stops a running benchmark and takes back its own collection');
+  const { ctx, page, errors } = await newContext(browser, { stubAudio: true, fastMs: 60_000, seed: { 'tessera.tour.v1': 'done', 'tessera.tour.muted': '1' } });
+  await page.goto(`${base}/?sizes=10000,100000`);
+  await waitFor(page, () => window.pivotBenchReady === true, null, 30_000);
+  await page.click('#benchBtn');
+  // Wait until the suite has actually swapped the collection out.
+  await waitFor(page, () => window.pivot?.datasetKey !== 'tax-cases:3000', null, 30_000);
+  const during = await page.evaluate(() => ({ key: window.pivot?.datasetKey, menu: document.querySelector('#dataset')?.value }));
+  check(during.menu === TOUR_DATASET && during.key !== TOUR_DATASET,
+    `benchmark swaps the collection behind the menu (menu ${during.menu}, loaded ${during.key})`);
+
+  await page.click('#tourBtn');
+  await page.waitForSelector('.tour-welcome', { timeout: 5000 });
+  await page.click('.tour-start');
+  // fastMs is a minute here, so nothing auto-advances: step one is the welcome
+  // line, and the map — the step that takes the app back — is the next click.
+  await waitFor(page, () => window.tessera?.tour?.phase === 'playing', null, 20_000);
+  await page.click('.tour-next');
+  await waitFor(page, (id) => window.tessera?.tour?.stepId === id, 'map', 20_000);
+  await waitFor(page, () => window.tessera?.tour?.phase === 'playing', null, 30_000);
+  const s = await appState(page);
+  check(expectations.map(s), `map: the tour's own collection is loaded ${JSON.stringify({ dataset: s.dataset, spec: s.spec })}`);
+  check((await page.$('.report')) === null, 'no benchmark report panel over the tour');
+
+  // The suite would have loaded its next target by now if it were still running.
+  await page.waitForTimeout(6000);
+  const after = await page.evaluate(() => ({ key: window.pivot?.datasetKey, always: window.pivot?.alwaysRender }));
+  check(after.key === TOUR_DATASET, `the benchmark stopped: still on ${after.key}`);
+  check(after.always === false, 'continuous rendering released');
+
+  // And a filter step still ticks, which is what the wrong collection broke.
+  for (let i = 0; i < 6; i++) await page.click('.tour-next');
+  await waitFor(page, (id) => window.tessera?.tour?.stepId === id, 'facet', 20_000);
+  await waitFor(page, () => window.tessera?.tour?.phase === 'playing', null, 20_000);
+  let f = await appState(page);
+  const t0 = Date.now();
+  while (!expectations.facet(f) && Date.now() - t0 < 6000) { await page.waitForTimeout(150); f = await appState(page); }
+  check(expectations.facet(f), `facet: ${JSON.stringify(f.facetChecked)} masked ${f.masked}`);
+  check(errors.length === 0, `no page errors (${errors.length})${errors.length ? ': ' + errors.join(' | ') : ''}`);
+  await ctx.close();
+}
+
 // -- main -----------------------------------------------------------------
 
 const server = startServer();
@@ -248,6 +302,7 @@ try {
   browser = await chromium.launch({ headless: !args.headed, args: ['--use-gl=angle', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] });
   await steppedPass(browser);
   await autoPass(browser);
+  await benchTakeoverPass(browser);
 } catch (err) {
   failures++;
   console.error(err);

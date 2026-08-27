@@ -158,6 +158,10 @@ export class TourUI {
     // at, and the caption — which is placed from the true rect — beside a
     // spotlight that has not arrived yet.
     this.spot.classList.add('tracking');
+    // The caption is placed from the same rect, and its own .3s glide would
+    // leave it lagging a card the camera is still settling on to — and, for a
+    // couple of hundred milliseconds, sitting over the very card it points at.
+    this.card.classList.add('tracking');
     if (this.track || typeof requestAnimationFrame !== 'function') return;
     const tick = () => {
       this.track = requestAnimationFrame(tick);
@@ -171,6 +175,7 @@ export class TourUI {
 
   private stopTracking(): void {
     this.spot.classList.remove('tracking');
+    this.card.classList.remove('tracking');
     if (this.track) cancelAnimationFrame(this.track);
     this.track = 0;
     this.lastRect = '';

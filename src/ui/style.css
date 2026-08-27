@@ -137,9 +137,18 @@ button.ghost { background: transparent; }
 #gl:active { cursor: grabbing; }
 
 .axes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.axes text { fill: var(--ink-3); font-size: 11px; font-family: inherit; }
-.axes text.title { fill: var(--ink-2); font-size: 11px; letter-spacing: .6px; text-transform: uppercase; }
-.axes line { stroke: var(--line); stroke-width: 1; }
+/* Axis labels sit *over* the board — a bucket's cards can run right up to the
+   baseline — so they are painted with a background-coloured outline behind the
+   glyphs. Without it a tick over a pale card is unreadable, and dimming it to
+   compensate would only hide it over a dark one. */
+.axes text {
+  fill: var(--ink-2); font-size: 12.5px; font-weight: 600; font-family: inherit;
+  paint-order: stroke fill;
+  stroke: var(--surface-0); stroke-width: 3.5px; stroke-linejoin: round; stroke-opacity: .9;
+}
+/* The one label that says what the whole axis is: the loudest thing on it. */
+.axes text.title { fill: var(--ink); font-size: 12px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.axes line { stroke: #3d3d39; stroke-width: 1; }
 
 .legend {
   position: absolute; top: 12px; right: 12px;
@@ -153,6 +162,8 @@ button.ghost { background: transparent; }
 .legend div { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 11.5px; }
 .legend i { width: 9px; height: 9px; border-radius: 2px; }
 
+/* Clear of the x-axis strip when there is one (see AxisOverlay.set). */
+.stage.has-x-axis .hud { bottom: 50px; }
 .hud {
   position: absolute; left: 12px; bottom: 12px;
   padding: 9px 12px;
@@ -382,7 +393,7 @@ button.ghost { background: transparent; }
   display: flex; flex-direction: column; gap: 10px;
   transition: left .3s ease, top .3s ease;
 }
-.tour-card.floating { transition: none; }
+.tour-card.floating, .tour-card.tracking { transition: none; }
 .tour-card h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.1px; }
 .tour-card h2[hidden] { display: none; }
 .tour-card p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--ink); }

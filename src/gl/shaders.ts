@@ -53,8 +53,13 @@ void main() {
   // fifth — so zooming out never resolved the map into points, it just packed
   // more 6 px blobs into the same area until they washed together.
   float px = s.z * u_cam.z;
-  float light = u_glow * (1.0 - smoothstep(u_lod.x, u_lod.y, px));
-  float halo = 1.0 + light * (max(3.0, GLOW_FLOOR_PX / max(px, 1e-3)) - 1.0);
+  // u_glow is a uniform, so this branch is taken by the whole draw call or by
+  // none of it: off the map the smoothstep and the divide never run.
+  float halo = 1.0;
+  if (u_glow > 0.0) {
+    float light = u_glow * (1.0 - smoothstep(u_lod.x, u_lod.y, px));
+    halo = 1.0 + light * (max(3.0, GLOW_FLOOR_PX / max(px, 1e-3)) - 1.0);
+  }
   vec2 world = s.xy + a_corner * s.z * halo;
   vec2 screen = (world - u_cam.xy) * u_cam.z;
   gl_Position = vec4(screen / (u_res * 0.5), 0.0, 1.0);
@@ -88,6 +93,7 @@ in float v_hi;
 
 uniform sampler2D u_atlas;
 uniform sampler2D u_hi;      // hi-res re-rasterisations of the cards in view when magnified
+uniform float u_hasHi;       // 0 while no card is flipped to u_hi — then it is never fetched
 uniform float u_texEnable;   // 0 disables atlas sampling entirely
 uniform float u_radius;      // corner radius as a fraction of the card
 uniform float u_edgeAA;      // 1 = feathered edges, 0 = hard (for tiling quads)
@@ -120,25 +126,38 @@ void main() {
   // Night lights: under the LOD band each card is a soft warm-cored glow that
   // accumulates where cards crowd — a city sums towards white, a lone card
   // stays a dim coloured point. Colour-by still tints the light.
-  float light = u_glow * (1.0 - texMix);
-  float r2 = dot(v_local, v_local) * 4.0;               // 0 centre .. 1 edge of the halo
-  // Energy conservation: the quad's area grows with halo^2, so the amplitude
-  // has to fall with it or every card emits *more* total light the further out
-  // you zoom — which is why the far view used to bloom instead of resolving.
   //
-  // Normalised to the minimum halo (3x) and scaled by GLOW_PEAK, because
-  // exp(-6r^2) integrates to two thirds of exp(-4r^2): together those keep a
-  // card at the minimum halo emitting exactly what it did before, so only the
-  // zoomed-out view changes.
-  float core = exp(-r2 * 6.0) * min(GLOW_PEAK, GLOW_PEAK * 9.0 / (v_halo * v_halo));
+  // Uniform branch again: every layout but the map skips the exponential and
+  // the reciprocal below, which is the most expensive arithmetic in the shader
+  // and was being paid on every fragment of every collection.
+  float light = 0.0;
+  float core = 0.0;
+  if (u_glow > 0.0) {
+    light = u_glow * (1.0 - texMix);
+    float r2 = dot(v_local, v_local) * 4.0;             // 0 centre .. 1 edge of the halo
+    // Energy conservation: the quad's area grows with halo^2, so the amplitude
+    // has to fall with it or every card emits *more* total light the further out
+    // you zoom — which is why the far view used to bloom instead of resolving.
+    //
+    // Normalised to the minimum halo (3x) and scaled by GLOW_PEAK, because
+    // exp(-6r^2) integrates to two thirds of exp(-4r^2): together those keep a
+    // card at the minimum halo emitting exactly what it did before, so only the
+    // zoomed-out view changes.
+    core = exp(-r2 * 6.0) * min(GLOW_PEAK, GLOW_PEAK * 9.0 / (v_halo * v_halo));
+  }
   float glow = light * core;
   if (mask <= 0.002 && glow <= 0.002) discard;
 
   vec3 rgb = v_color.rgb;
   if (texMix > 0.0) {
-    // Both fetches always taken: branching on v_hi around texture() would leave
-    // the mip derivatives undefined at the seam between hi-res and base cards.
-    vec4 tex = mix(texture(u_atlas, v_uv), texture(u_hi, v_uv), v_hi);
+    // v_hi varies between neighbouring instances, so the two fetches stay
+    // unconditional within a draw: branching on it would leave the mip
+    // derivatives undefined at the seam between hi-res and base cards. u_hasHi
+    // is uniform and settles the whole draw call, and it is 0 for every frame
+    // with no plan committed — which is most of them, and all of them above
+    // the zoom where a card is worth its own raster.
+    vec4 tex = texture(u_atlas, v_uv);
+    if (u_hasHi > 0.0) tex = mix(tex, texture(u_hi, v_uv), v_hi);
     rgb = mix(rgb, tex.rgb, texMix * tex.a);
   }
 
@@ -160,9 +179,12 @@ void main() {
   float a = v_color.a * mask;
   vec4 card = vec4(rgb * a, a);
 
-  vec3 warm = vec3(1.0, 0.86, 0.62);
-  vec3 lit = mix(v_color.rgb, warm, 0.45 * core) * core;
-  vec4 add = vec4(lit * v_color.a, 0.0);
-  outColor = mix(card, add, light);
+  outColor = card;
+  if (u_glow > 0.0) {
+    vec3 warm = vec3(1.0, 0.86, 0.62);
+    vec3 lit = mix(v_color.rgb, warm, 0.45 * core) * core;
+    vec4 add = vec4(lit * v_color.a, 0.0);
+    outColor = mix(card, add, light);
+  }
 }
 `;
