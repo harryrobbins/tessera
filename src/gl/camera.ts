@@ -1,3 +1,4 @@
+import { easeInOutCubic } from '../core/ease';
 import type { Camera } from './renderer';
 import type { Bounds } from '../layout/layouts';
 
@@ -18,9 +19,33 @@ export class CameraController {
   private dragging = false;
   private lastX = 0;
   private lastY = 0;
+  private downX = 0;
+  private downY = 0;
+  /** Set once a press has moved past `dragThresholdPx`; survives the release so
+   *  the `click` that follows a pan can be told apart from a tap. */
+  private moved = false;
+  /** Active pointers, for two-finger pinch. */
+  private pointers = new Map<number, { x: number; y: number }>();
+  private pinchDist = 0;
   private canvas: HTMLCanvasElement;
-  private dpr = () => Math.min(window.devicePixelRatio || 1, 2);
+  /** CSS pixels a press may travel and still count as a click. */
+  dragThresholdPx = 4;
   onChange?: () => void;
+
+  /** True if the most recent press moved far enough to be a pan or pinch. A
+   *  click handler checks this to avoid selecting whatever a drag ended over. */
+  get wasDrag(): boolean {
+    return this.moved;
+  }
+
+  /** Device pixels per CSS pixel, read from the canvas itself so drag deltas,
+   *  wheel anchors and `screenToWorld` (which divides by `canvas.width`) all
+   *  agree — uncapped, because the drawing buffer is. */
+  private dpr(): number {
+    const cw = this.canvas.clientWidth;
+    if (cw > 0 && this.canvas.width > 0) return this.canvas.width / cw;
+    return (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -41,14 +66,38 @@ export class CameraController {
   private onDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     this.cancelTween();
-    this.dragging = true;
-    this.lastX = e.clientX;
-    this.lastY = e.clientY;
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     this.canvas.setPointerCapture(e.pointerId);
+    if (this.pointers.size === 2) {
+      // Second finger: switch from pan to pinch about the midpoint.
+      this.dragging = false;
+      this.pinchDist = this.pointerSpan();
+      this.moved = true;
+      return;
+    }
+    this.dragging = true;
+    this.moved = false;
+    this.downX = this.lastX = e.clientX;
+    this.downY = this.lastY = e.clientY;
   };
 
   private onMove = (e: PointerEvent) => {
+    const p = this.pointers.get(e.pointerId);
+    if (p) {
+      p.x = e.clientX;
+      p.y = e.clientY;
+    }
+    if (this.pointers.size >= 2) {
+      this.pinch();
+      return;
+    }
     if (!this.dragging) return;
+    if (!this.moved) {
+      const dx = e.clientX - this.downX;
+      const dy = e.clientY - this.downY;
+      if (dx * dx + dy * dy < this.dragThresholdPx * this.dragThresholdPx) return;
+      this.moved = true;
+    }
     const k = this.dpr() / this.target.zoom;
     this.target.x -= (e.clientX - this.lastX) * k;
     this.target.y += (e.clientY - this.lastY) * k;
@@ -58,9 +107,39 @@ export class CameraController {
   };
 
   private onUp = (e: PointerEvent) => {
+    this.pointers.delete(e.pointerId);
     this.dragging = false;
+    if (this.pointers.size === 1) {
+      // One finger lifted mid-pinch: the other carries on as a pan, but the
+      // gesture stays a drag so the release does not read as a click.
+      const [rest] = this.pointers.values();
+      this.dragging = true;
+      this.lastX = rest.x;
+      this.lastY = rest.y;
+    }
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
   };
+
+  private pointerSpan(): number {
+    const [a, b] = this.pointers.values();
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  }
+
+  /** Two-finger pinch: zoom about the midpoint by the change in finger spacing. */
+  private pinch() {
+    const dist = this.pointerSpan();
+    if (dist < 1 || this.pinchDist < 1) {
+      this.pinchDist = dist;
+      return;
+    }
+    const [a, b] = this.pointers.values();
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = this.dpr();
+    const px = ((a.x + b.x) / 2 - rect.left) * dpr;
+    const py = ((a.y + b.y) / 2 - rect.top) * dpr;
+    this.zoomAt(px, py, dist / this.pinchDist);
+    this.pinchDist = dist;
+  }
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
@@ -93,6 +172,10 @@ export class CameraController {
    *  caller round the resulting scale — a raster needs a whole number of device
    *  pixels per cell or it point-samples into a moire. */
   fit(b: Bounds, padPx = 48, animate = true, ms = 900, quantise?: (zoom: number) => number) {
+    // Nothing to frame (every row filtered out, or a degenerate box): keep the
+    // camera where it is rather than clamping to maxZoom on a 1e-6 extent.
+    if (!isFinite(b.minX) || !isFinite(b.maxX) || !isFinite(b.minY) || !isFinite(b.maxY)) return;
+    if (b.maxX - b.minX <= 0 || b.maxY - b.minY <= 0) return;
     const w = Math.max(1, this.canvas.width - padPx * 2);
     const h = Math.max(1, this.canvas.height - padPx * 2);
     const bw = Math.max(1e-6, b.maxX - b.minX);
@@ -167,10 +250,6 @@ export class CameraController {
     c.removeEventListener('pointercancel', this.onUp);
     c.removeEventListener('wheel', this.onWheel);
   }
-}
-
-export function easeInOutCubic(x: number): number {
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
 export function clamp(v: number, lo: number, hi: number) {

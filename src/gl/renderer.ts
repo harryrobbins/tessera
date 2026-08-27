@@ -1,13 +1,7 @@
+import { easeInOutCubic } from '../core/ease';
 import { VERT, FRAG } from './shaders';
 
 export interface Camera { x: number; y: number; zoom: number }
-
-export interface RenderStats {
-  instances: number;
-  drawCalls: number;
-  uploadMs: number;
-  gpuHint: string;
-}
 
 const STYLE_STRIDE = 16; // 4x u16 uv + 4x u8 colour + 4x u8 meta
 
@@ -28,13 +22,26 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
 export class CardRenderer {
   readonly gl: WebGL2RenderingContext;
   readonly canvas: HTMLCanvasElement;
-  private program: WebGLProgram;
-  private vao: WebGLVertexArrayObject;
-  private quadBuf: WebGLBuffer;
-  private fromBuf: WebGLBuffer;
-  private toBuf: WebGLBuffer;
-  private styleBuf: WebGLBuffer;
-  private atlasTex: WebGLTexture;
+  private program!: WebGLProgram;
+  private vao!: WebGLVertexArrayObject;
+  private quadBuf!: WebGLBuffer;
+  private fromBuf!: WebGLBuffer;
+  private toBuf!: WebGLBuffer;
+  private styleBuf!: WebGLBuffer;
+  private atlasTex!: WebGLTexture;
+  private hiTex!: WebGLTexture;
+  /** Side of the allocated hi-res texture, 0 until first use. */
+  hiSize = 0;
+  /** Largest texture side this context allows (WebGL2 guarantees only 2048). */
+  readonly maxTextureSize: number;
+  /** Side of the base card atlas: 4096 where the GPU allows it, else the limit. */
+  readonly atlasSize: number;
+  /** True between `webglcontextlost` and the restore; every draw is skipped. */
+  contextLost = false;
+  /** Called after the GL objects are rebuilt following a context restore. The
+   *  instance buffers are re-uploaded here; both atlases come back empty, so
+   *  the owner must redraw and re-set them (PivotApp.buildCards does both). */
+  onContextRestored?: () => void;
   private u: Record<string, WebGLUniformLocation | null> = {};
 
   /** CPU mirrors — kept so a new layout can start from wherever cards are now. */
@@ -53,6 +60,10 @@ export class CardRenderer {
   cornerRadius = 0.14;
   /** 1 = antialiased card edges; 0 = hard edges, for layouts whose cards tile. */
   edgeAA = 1;
+  /** Card width in device px over which the flat dot fades into card art. */
+  lod: [number, number] = [3, 9];
+  /** 1 = cards below the LOD band are additive points of light (the map). */
+  glow = 0;
   hasAtlas = false;
   lastUploadMs = 0;
   gpuHint = 'unknown';
@@ -83,7 +94,32 @@ export class CardRenderer {
     this.gpuHint = String(
       (dbg && gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER),
     );
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    this.atlasSize = Math.min(4096, this.maxTextureSize);
 
+    // After a GPU reset every call silently no-ops and the page would show a
+    // frozen preserveDrawingBuffer frame forever. preventDefault opts in to a
+    // restore; everything GL-side is then rebuilt from the CPU mirrors.
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.contextLost = true;
+      this.inFlight = [];
+      this.queries = [];
+    });
+    canvas.addEventListener('webglcontextrestored', () => {
+      this.init();
+      this.contextLost = false;
+      this.reupload();
+      this.onContextRestored?.();
+    });
+
+    this.init();
+  }
+
+  /** Create every GL object: program, VAO, instance buffers, both atlas
+   *  textures, timer queries, blend state. Called once, and again on restore. */
+  private init() {
+    const gl = this.gl;
     const prog = gl.createProgram()!;
     gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VERT));
     gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FRAG));
@@ -92,7 +128,8 @@ export class CardRenderer {
       throw new Error(`program link failed: ${gl.getProgramInfoLog(prog)}`);
     }
     this.program = prog;
-    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_texEnable', 'u_radius', 'u_edgeAA']) {
+    this.u = {};
+    for (const name of ['u_t', 'u_cam', 'u_res', 'u_stagger', 'u_atlas', 'u_hi', 'u_texEnable', 'u_radius', 'u_edgeAA', 'u_lod', 'u_glow']) {
       this.u[name] = gl.getUniformLocation(prog, name);
     }
 
@@ -139,17 +176,45 @@ export class CardRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.hasAtlas = false;
+
+    // The hi-res atlas starts as a 1x1 placeholder so the sampler is always
+    // bound; real storage is allocated lazily by ensureHi().
+    this.hiTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.hiSize = 0;
 
     // True GPU cost per frame. Without it, a slow driver just queues commands and
     // the rAF rate lies about how fast the frame really was.
     this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    this.queries = [];
+    this.inFlight = [];
     if (this.timerExt) {
       for (let i = 0; i < 3; i++) this.queries.push(gl.createQuery()!);
     }
 
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
-    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // Premultiplied: the fragment shader emits rgb * a. Identical to straight
+    // alpha for cards, and alpha-0 fragments become purely additive lights.
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  /** Push the CPU mirrors into freshly created instance buffers (restore). */
+  private reupload() {
+    if (this.capacity === 0) return;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.fromBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.from, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.toBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.to, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.styleBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.styleU8, gl.DYNAMIC_DRAW);
   }
 
   /** (Re)allocate for n cards. Existing contents are discarded. */
@@ -174,12 +239,8 @@ export class CardRenderer {
   }
 
   /** Per-card appearance. uv rects are 0..1 and are stored as normalised u16. */
-  setStyle(i: number, uv: [number, number, number, number], r: number, g: number, b: number, a = 255, delay = 0, selected = 0, dim = 0) {
-    const o16 = i * 8;
-    this.styleU16[o16] = uv[0] * 65535;
-    this.styleU16[o16 + 1] = uv[1] * 65535;
-    this.styleU16[o16 + 2] = uv[2] * 65535;
-    this.styleU16[o16 + 3] = uv[3] * 65535;
+  setStyle(i: number, uv: [number, number, number, number], r: number, g: number, b: number, a = 255, delay = 0, selected = 0, hi = 0) {
+    this.setUv(i, uv);
     const o8 = i * STYLE_STRIDE + 8;
     this.styleU8[o8] = r;
     this.styleU8[o8 + 1] = g;
@@ -187,11 +248,36 @@ export class CardRenderer {
     this.styleU8[o8 + 3] = a;
     this.styleU8[o8 + 4] = delay * 255;
     this.styleU8[o8 + 5] = selected ? 255 : 0;
-    this.styleU8[o8 + 6] = dim * 255;
+    this.styleU8[o8 + 6] = 0; // a_meta.z: spare
+    this.styleU8[o8 + 7] = hi ? 255 : 0;
+  }
+
+  setUv(i: number, uv: [number, number, number, number]) {
+    const o16 = i * 8;
+    this.styleU16[o16] = uv[0] * 65535;
+    this.styleU16[o16 + 1] = uv[1] * 65535;
+    this.styleU16[o16 + 2] = uv[2] * 65535;
+    this.styleU16[o16 + 3] = uv[3] * 65535;
   }
 
   setSelected(i: number, on: boolean) {
     this.styleU8[i * STYLE_STRIDE + 8 + 5] = on ? 255 : 0;
+  }
+
+  /**
+   * Mark card `i` as hovered or keyboard-focused: the middle value of the byte
+   * that already carries the selection, so this costs no new attribute and no
+   * new upload path. A selected card keeps its ring — 255 wins over 128.
+   */
+  setMarked(i: number, on: boolean) {
+    const o = i * STYLE_STRIDE + 8 + 5;
+    if (this.styleU8[o] === 255) return;   // selected: the ring is louder
+    this.styleU8[o] = on ? 128 : 0;
+  }
+
+  /** Whether card i samples the hi-res atlas (its uv must then point into it). */
+  setHi(i: number, on: boolean) {
+    this.styleU8[i * STYLE_STRIDE + 8 + 7] = on ? 255 : 0;
   }
 
   /** Upload a single card's style — used for selection, where re-uploading the
@@ -221,7 +307,7 @@ export class CardRenderer {
     const n = this.count;
     const from = this.from;
     const to = this.to;
-    const e = ease(this.t);
+    const e = easeInOutCubic(this.t);
 
     if (this.t >= 1) {
       from.set(to.subarray(0, n * 4));
@@ -249,24 +335,15 @@ export class CardRenderer {
     this.lastUploadMs = performance.now() - t0;
   }
 
-  /** Place cards with no animation (initial load). */
-  jumpTo(targets: Float32Array) {
-    const n = this.count * 4;
-    this.to.set(targets.subarray(0, n));
-    this.from.set(targets.subarray(0, n));
-    const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.fromBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.from, gl.DYNAMIC_DRAW, 0, n);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.toBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.to, gl.DYNAMIC_DRAW, 0, n);
-    this.t = 1;
-  }
-
   /** Drop back to flat colour quads — pixels and dense scatters have no card art. */
   clearAtlas() {
     this.hasAtlas = false;
   }
 
+  // Note (D-21): this re-uploads the whole atlas (4096² RGBA + mips, 64 MB) on
+  // every colour change of a card dataset. If that ever shows up, upload only
+  // the rows the atlas actually filled with texSubImage2D, or size the atlas
+  // canvas to ceil(sqrt(n)) slots instead of the full square.
   setAtlas(source: TexImageSource, mipLevels = 3) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
@@ -282,6 +359,50 @@ export class CardRenderer {
     this.hasAtlas = true;
   }
 
+  /** Allocate (or reallocate) the hi-res atlas at `size` px square. Returns true
+   *  when storage was (re)created, which discards every slot. */
+  ensureHi(size: number): boolean {
+    if (this.hiSize === size) return false;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 3);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+    if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, 4);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    this.hiSize = size;
+    return true;
+  }
+
+  /** Free the hi-res atlas back to its 1x1 placeholder (dataset change). */
+  releaseHi() {
+    if (this.hiSize === 0) return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    this.hiSize = 0;
+  }
+
+  /** Copy one rasterised card (with its bleed) into the hi-res atlas at (x, y). */
+  setHiSlot(x: number, y: number, source: TexImageSource) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  }
+
+  /** Rebuild the hi-res mip chain — once per batch of setHiSlot calls. */
+  finishHi() {
+    if (this.hiSize === 0) return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  }
+
   /** Advance the transition clock. Returns true while still animating. */
   advance(dtMs: number): boolean {
     if (this.t >= 1) return false;
@@ -289,12 +410,13 @@ export class CardRenderer {
     return true;
   }
 
-  render(cam: Camera, clear: [number, number, number]): RenderStats {
+  render(cam: Camera, clear: [number, number, number]) {
     const gl = this.gl;
+    if (this.contextLost) return;
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.clearColor(clear[0], clear[1], clear[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (this.count === 0) return { instances: 0, drawCalls: 0, uploadMs: this.lastUploadMs, gpuHint: this.gpuHint };
+    if (this.count === 0) return;
 
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
@@ -305,15 +427,19 @@ export class CardRenderer {
     gl.uniform1f(this.u.u_texEnable!, this.hasAtlas ? 1 : 0);
     gl.uniform1f(this.u.u_radius!, this.cornerRadius);
     gl.uniform1f(this.u.u_edgeAA!, this.edgeAA);
+    gl.uniform2f(this.u.u_lod!, this.lod[0], this.lod[1]);
+    gl.uniform1f(this.u.u_glow!, this.glow);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.atlasTex);
     gl.uniform1i(this.u.u_atlas!, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.hiTex);
+    gl.uniform1i(this.u.u_hi!, 1);
 
     const q = this.beginTimer();
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, this.count);
     if (q) this.endTimer();
     gl.bindVertexArray(null);
-    return { instances: this.count, drawCalls: 1, uploadMs: this.lastUploadMs, gpuHint: this.gpuHint };
   }
 
   /** True when the GPU is at least two frames behind. Issuing more work now just
@@ -344,22 +470,26 @@ export class CardRenderer {
     const gl = this.gl;
     const ext = this.timerExt;
     if (!ext || this.inFlight.length === 0) return;
-    const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT);
+    if (gl.getParameter(ext.GPU_DISJOINT_EXT)) {
+      // Every query issued before the disjoint event carries garbage, not just
+      // the head — return them all to the pool unread.
+      for (const q of this.inFlight) this.queries.push(q);
+      this.inFlight = [];
+      return;
+    }
     const q = this.inFlight[0];
     if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) {
       this.inFlight.shift();
-      if (!disjoint) {
-        const ns = gl.getQueryParameter(q, gl.QUERY_RESULT) as number;
-        const ms = ns / 1e6;
-        this.gpuMs = this.gpuMs < 0 ? ms : this.gpuMs * 0.8 + ms * 0.2;
-      }
+      const ns = gl.getQueryParameter(q, gl.QUERY_RESULT) as number;
+      const ms = ns / 1e6;
+      this.gpuMs = this.gpuMs < 0 ? ms : this.gpuMs * 0.8 + ms * 0.2;
       this.queries.push(q);
     }
   }
 
   /** Current interpolated position of card i (world units) — for hit-testing. */
   positionOf(i: number, out: [number, number, number] = [0, 0, 0]): [number, number, number] {
-    const e = ease(this.t);
+    const e = easeInOutCubic(this.t);
     const o = i * 4;
     out[0] = this.from[o] + (this.to[o] - this.from[o]) * e;
     out[1] = this.from[o + 1] + (this.to[o + 1] - this.from[o + 1]) * e;
@@ -369,7 +499,7 @@ export class CardRenderer {
 
   /** Index of the topmost card containing a world-space point, or -1. */
   pick(wx: number, wy: number): number {
-    const e = ease(this.t);
+    const e = easeInOutCubic(this.t);
     const { from, to, count } = this;
     for (let i = count - 1; i >= 0; i--) {
       const o = i * 4;
@@ -392,11 +522,8 @@ export class CardRenderer {
     gl.deleteBuffer(this.toBuf);
     gl.deleteBuffer(this.styleBuf);
     gl.deleteTexture(this.atlasTex);
+    gl.deleteTexture(this.hiTex);
     gl.deleteProgram(this.program);
     gl.deleteVertexArray(this.vao);
   }
-}
-
-export function ease(x: number): number {
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
