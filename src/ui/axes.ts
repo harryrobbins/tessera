@@ -14,6 +14,9 @@ export class AxisOverlay {
   xAxis?: Axis;
   yAxis?: Axis;
   private dpr = 1;
+  /** What the SVG currently shows; render() is a no-op until one of these moves. */
+  private drawn = { x: NaN, y: NaN, zoom: NaN, w: NaN, h: NaN, dpr: NaN, axes: -1 };
+  private axesVersion = 0;
 
   constructor(svg: SVGSVGElement) {
     this.svg = svg;
@@ -22,9 +25,21 @@ export class AxisOverlay {
   set(xAxis?: Axis, yAxis?: Axis) {
     this.xAxis = xAxis;
     this.yAxis = yAxis;
+    this.axesVersion++;
   }
 
+  /**
+   * Called every rAF, drawn only when the camera, viewport or axes changed —
+   * an idle frame must not rebuild ~40 SVG nodes.
+   */
   render(cam: Camera, cssW: number, cssH: number, dpr: number) {
+    const d = this.drawn;
+    if (
+      d.x === cam.x && d.y === cam.y && d.zoom === cam.zoom &&
+      d.w === cssW && d.h === cssH && d.dpr === dpr && d.axes === this.axesVersion
+    ) return;
+    d.x = cam.x; d.y = cam.y; d.zoom = cam.zoom;
+    d.w = cssW; d.h = cssH; d.dpr = dpr; d.axes = this.axesVersion;
     this.dpr = dpr;
     const frag = document.createDocumentFragment();
     if (this.xAxis) this.renderX(frag, this.xAxis, cam, cssW, cssH);
@@ -74,12 +89,6 @@ export class AxisOverlay {
     const title = text(0, 0, axis.title, 'middle', 'title');
     title.setAttribute('transform', `translate(14, ${cssH / 2}) rotate(-90)`);
     frag.appendChild(title);
-  }
-
-  clear() {
-    this.xAxis = undefined;
-    this.yAxis = undefined;
-    this.svg.replaceChildren();
   }
 }
 

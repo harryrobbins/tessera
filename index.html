@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Tessera — GPU unit visualisation</title>
-  <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
 <body>
   <div id="app">
@@ -17,10 +16,10 @@
       </label>
 
       <div class="seg" id="layoutSeg" role="tablist" aria-label="Layout">
-        <button data-layout="grid" class="active" role="tab" aria-selected="true">Grid</button>
-        <button data-layout="bars" role="tab" aria-selected="false">Bars</button>
-        <button data-layout="scatter" role="tab" aria-selected="false">Cross-tab</button>
-        <button data-layout="xy" role="tab" aria-selected="false">Scatter</button>
+        <button type="button" data-layout="grid" class="active" role="tab" aria-selected="true" tabindex="0">Grid</button>
+        <button type="button" data-layout="bars" role="tab" aria-selected="false" tabindex="-1">Bars</button>
+        <button type="button" data-layout="scatter" role="tab" aria-selected="false" tabindex="-1">Cross-tab</button>
+        <button type="button" data-layout="xy" role="tab" aria-selected="false" tabindex="-1">Scatter</button>
       </div>
 
       <label class="field" id="sortField">
@@ -47,24 +46,37 @@
 
       <div class="spacer"></div>
       <div class="seg" id="zoomSeg">
-        <button id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button>
-        <button id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        <button type="button" id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button>
+        <button type="button" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
       </div>
-      <button id="metricsBtn" class="ghost" title="Show or hide the performance readout (M)" aria-pressed="true">Metrics</button>
-      <button id="fitBtn" class="ghost" title="Frame everything (F)">Fit</button>
-      <button id="benchBtn" class="ghost" title="Run the FPS benchmark">Benchmark</button>
+      <button type="button" id="metricsBtn" class="ghost" title="Show or hide the performance readout (M)" aria-pressed="true">Metrics</button>
+      <div class="popover-host">
+        <button type="button" id="cardsBtn" class="ghost" title="How the cards are drawn">Cards</button>
+        <div class="popover" id="cardSettings" hidden></div>
+      </div>
+      <button type="button" id="fitBtn" class="ghost" title="Frame everything (F)">Fit</button>
+      <button type="button" id="tourBtn" class="ghost" title="Take the guided tour">Tour</button>
+      <button type="button" id="benchBtn" class="ghost" title="Run the FPS benchmark">Benchmark</button>
     </header>
 
     <aside class="sidebar" id="facets" aria-label="Filters"></aside>
 
     <main class="stage">
-      <canvas id="gl" aria-label="Card collection"></canvas>
+      <canvas id="gl" tabindex="0" role="application" aria-label="Card collection" aria-describedby="glHelp"></canvas>
+      <p id="glHelp" class="sr-only">Arrow keys move between cards. Enter opens the selected record. Escape clears it. Plus and minus zoom; F frames everything.</p>
+      <p id="cardLive" class="sr-only" aria-live="polite"></p>
+      <div class="cursor-chip" id="cursorChip" hidden></div>
       <svg class="axes" id="axes" aria-hidden="true"></svg>
       <div class="legend" id="legend"></div>
       <div class="hud" id="hud"></div>
-      <div class="detail" id="detail" hidden></div>
-      <div class="toast" id="toast" hidden></div>
     </main>
+  </div>
+  <!-- Outside #app so the dialog can make the whole application inert behind
+       itself, and so the toast fired from inside it sits above the scrim. -->
+  <div id="overlay">
+    <div class="scrim" id="scrim" hidden></div>
+    <div class="detail" id="detail" hidden></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

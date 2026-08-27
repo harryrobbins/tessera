@@ -1,13 +1,20 @@
 import './ui/style.css';
-import { PivotApp, TRUE_COLOUR, PIXEL_IMAGES } from './app';
+import { PivotApp, TRUE_COLOUR } from './app';
 import { Hud } from './ui/hud';
 import { AxisOverlay } from './ui/axes';
 import { FacetPanel } from './ui/facets';
+import { DetailPane, registerDetail } from './ui/detail';
+import { CardSettingsPanel, loadSettings, type CardSettings } from './ui/settings';
+import { customCardFor } from './gl/cards';
+import { cardTextOf, compileCard, type CardModel } from './gl/cards/model';
+import { taxCaseDetail } from './ui/detail/taxCase';
 import { runBench, type BenchResult } from './bench/bench';
-import { categoricalColor } from './core/palette';
-import { valueAt } from './data/columnar';
+import { fieldColors, hasNamedColors, OTHER } from './core/palette';
+import { esc } from './core/esc';
 import type { LayoutSpec } from './layout/layouts';
-import { PRODUCT_SIZES } from './data/products';
+import { menuEntries, describeKey, familyOf, DEFAULT_DATASET_KEY } from './data/registry';
+import { startTour, shouldAutoStart, exposeTour } from './tour';
+import type { TourHost } from './tour/actions';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -37,31 +44,76 @@ let sortPinned = false;
 
 // ------------------------------------------------------------------ chrome
 
-const PIXEL_TITLES: Record<string, string> = {
-  'starry-night': 'Starry Night Over the Rhône',
-  'great-wave': 'The Great Wave',
-  'millot-papillons': 'Millot’s Butterflies',
-};
-datasetSel.innerHTML = [
-  '<option value="titanic">Titanic — 891</option>',
-  ...PRODUCT_SIZES.map((n) => `<option value="products:${n}">Products — ${n.toLocaleString()}</option>`),
-  '<option value="products:2000000">Products — 2,000,000</option>',
-  ...PIXEL_IMAGES.flatMap((img: string) => [250_000, 1_000_000].map((n) =>
-    `<option value="pixels:${img}:${n}">${PIXEL_TITLES[img] ?? img} — ${(n / 1000).toFixed(0)}k pixels</option>`)),
-].join('');
+{
+  // One <optgroup> per dataset family, from the registry (src/data/registry.ts).
+  const groups = new Map<string, string[]>();
+  for (const e of menuEntries()) {
+    const g = e.group ?? '';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g)!.push(`<option value="${esc(e.key)}">${esc(e.label)}</option>`);
+  }
+  datasetSel.innerHTML = [...groups].map(([g, opts]) => `<optgroup label="${esc(g)}">${opts.join('')}</optgroup>`).join('');
+}
 
 function fillSelect(sel: HTMLSelectElement, fields: string[], selectedValue: string, allowNone = false) {
   sel.innerHTML =
     (allowNone ? '<option value="">none</option>' : '') +
-    fields.map((f) => `<option value="${f}"${f === selectedValue ? ' selected' : ''}>${f}</option>`).join('');
+    fields.map((f) => `<option value="${esc(f)}"${f === selectedValue ? ' selected' : ''}>${esc(f)}</option>`).join('');
 }
 
+let toastTimer = 0;
+/** Pending modal open, cancelled if the selection changes mid-flight. */
+let openTimer = 0;
 function toast(msg: string, ms = 2400) {
   toastEl.textContent = msg;
   toastEl.hidden = false;
-  window.clearTimeout((toast as unknown as { t?: number }).t);
-  (toast as unknown as { t?: number }).t = window.setTimeout(() => { toastEl.hidden = true; }, ms);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { toastEl.hidden = true; }, ms);
 }
+
+/** Camera tween length; 0 under prefers-reduced-motion (app.ts sets `transitionMs` to 0 there). */
+const tweenMs = (ms: number) => (app.renderer.transitionMs === 0 ? 0 : ms);
+
+registerDetail('tax-cases', taxCaseDetail);
+/** The record pane; closing it (button or Escape) also drops the selection ring. */
+const detail = new DetailPane(detailEl, {
+  onClose() {
+    if (selected >= 0) { app.renderer.setSelected(selected, false); app.renderer.uploadStyleAt(selected); }
+    selected = -1;
+  },
+  onToast: (msg) => toast(msg),
+  scrim: $('scrim'),
+  background: $('app'),
+  mask: () => app.mask,
+  cardRect: (i) => app.cardScreenRect(i),
+  transitionMs: () => app.renderer.transitionMs,
+});
+
+/** Card settings: the design, whether the board is cards or pure colour,
+ *  tags, and which column titles a record. Applied by repainting the atlas —
+ *  no layout re-solve, so the board does not move under the viewer. */
+const cardPanel = new CardSettingsPanel($('cardSettings'), loadSettings(), {
+  button: $('cardsBtn') as HTMLButtonElement,
+  onChange: (s) => applyCardSettings(s),
+  fields: () => {
+    const ds = app.dataset;
+    const titles = ds
+      ? Object.keys(ds.columns).filter((c) => ds.columns[c]?.kind === 'text' || ds.columns[c]?.kind === 'category')
+      : [];
+    return { titles, custom: ds ? customCardFor(ds) : undefined };
+  },
+});
+
+function applyCardSettings(s: CardSettings) {
+  app.setCardOptions({
+    design: s.design === 'auto' ? undefined : s.design,
+    tags: s.tags,
+    title: s.title || undefined,
+  }, s.labels);
+}
+// Adopt what was stored (or `?cards=`) before the first collection lands:
+// `buildCards` is a no-op until there is one, so this only sets the fields.
+applyCardSettings(cardPanel.settings);
 
 function currentSpec(): LayoutSpec {
   switch (layoutKind) {
@@ -74,10 +126,15 @@ function currentSpec(): LayoutSpec {
       const nums = app.dataset ? Object.keys(app.dataset.columns)
         .filter((f) => app.dataset!.columns[f]?.kind === 'number') : [];
       const x = nums.includes(xSel.value) ? xSel.value : nums[0] ?? xSel.value;
-      const y = nums.includes(ySel.value) ? ySel.value : nums[1] ?? nums[0] ?? ySel.value;
+      let y = nums.includes(ySel.value) ? ySel.value : nums[1] ?? nums[0] ?? ySel.value;
+      // Never plot a column against itself (Longitude x Longitude is a black diagonal).
+      if (y === x) y = nums.find((f) => f !== x) ?? y;
       if (x !== xSel.value) xSel.value = x;
       if (y !== ySel.value) ySel.value = y;
-      return { type: 'xy', x, y };
+      // Geographic axes keep their true aspect and render as night lights.
+      const geo = app.dataset?.geo;
+      const equal = !!geo && x === geo.lon && y === geo.lat;
+      return { type: 'xy', x, y, equal };
     }
     case 'scatter':
       return {
@@ -92,9 +149,21 @@ function currentSpec(): LayoutSpec {
   }
 }
 
+/** The most recent solve, so the tour can wait for a layout to settle. */
+let lastApply: Promise<void> = Promise.resolve();
 async function apply(refit = false) {
-  await app.setLayout(currentSpec());
-  if (refit) app.fit();
+  const p = (async () => {
+    try {
+      await app.setLayout(currentSpec());
+    } catch (err) {
+      // A layout the worker could not solve (D-04) — say so rather than hang.
+      toast(`Layout failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
+      return;
+    }
+    if (refit) app.fit();
+  })();
+  lastApply = p;
+  return p;
 }
 
 function updateControls() {
@@ -111,38 +180,16 @@ function renderLegend() {
   const ds = app.dataset;
   const col = ds?.columns[app.colorBy];
   if (!ds || !col || col.kind !== 'category') { legendEl.innerHTML = ''; return; }
-  const shown = col.categories.slice(0, 8);
+  const swatches = fieldColors(ds, app.colorBy);
+  // Pinned / colour-name fields carry a real colour per category, so show them all.
+  const shown = col.categories.slice(0, hasNamedColors(ds, app.colorBy) ? 24 : 8);
   legendEl.innerHTML =
     shown
-      .map((c, i) => `<div><i style="background:${categoricalColor(i)}"></i>${c}</div>`)
+      .map((c, i) => `<div><i style="background:${esc(swatches[i] ?? OTHER.dark)}"></i>${esc(c)}</div>`)
       .join('') +
     (col.categories.length > shown.length
-      ? `<div><i style="background:#6f6e66"></i>+${col.categories.length - shown.length} more</div>`
+      ? `<div><i style="background:${OTHER.dark}"></i>+${col.categories.length - shown.length} more</div>`
       : '');
-}
-
-function showDetail(i: number) {
-  const ds = app.dataset;
-  if (!ds || i < 0) { detailEl.hidden = true; return; }
-  const col = ds.columns[app.colorBy];
-  const code = col?.kind === 'category' ? col.codes[i] : 0;
-  const rows = Object.keys(ds.columns)
-    .filter((f) => f !== ds.labelColumn)
-    .map((f) => `<dt>${f}</dt><dd>${valueAt(ds, f, i)}</dd>`)
-    .join('');
-  detailEl.innerHTML = `
-    <header style="background:${categoricalColor(code)}">
-      <h2>${valueAt(ds, ds.labelColumn, i) || `Item ${i}`}</h2>
-      <p>${app.colorBy ? valueAt(ds, app.colorBy, i) : app.datasetName}</p>
-    </header>
-    <dl>${rows}</dl>
-    <button class="close" aria-label="Close">×</button>`;
-  detailEl.hidden = false;
-  detailEl.querySelector('.close')!.addEventListener('click', () => {
-    detailEl.hidden = true;
-    if (selected >= 0) { app.renderer.setSelected(selected, false); app.renderer.uploadStyleAt(selected); }
-    selected = -1;
-  });
 }
 
 // ------------------------------------------------------------------- wiring
@@ -160,8 +207,12 @@ function fillAxisSelects() {
   const xOpts = layoutKind === 'xy' ? nums : [...cats, ...nums];
   const yOpts = layoutKind === 'xy' ? nums : [...nums, ...cats];
   const keep = (v: string, opts: string[], alt: string) => (opts.includes(v) ? v : alt);
-  fillSelect(xSel, xOpts, keep(xSel.value, xOpts, xOpts[0] ?? ''));
-  fillSelect(ySel, yOpts, keep(ySel.value, yOpts, yOpts[1] ?? yOpts[0] ?? ''));
+  const x = keep(xSel.value, xOpts, xOpts[0] ?? '');
+  let y = keep(ySel.value, yOpts, yOpts[1] ?? yOpts[0] ?? '');
+  // Never open a raw scatter on the same column twice (Longitude × Longitude).
+  if (layoutKind === 'xy' && y === x) y = yOpts.find((o) => o !== x) ?? y;
+  fillSelect(xSel, xOpts, x);
+  fillSelect(ySel, yOpts, y);
 }
 
 app.onDataset = (ds) => {
@@ -169,31 +220,90 @@ app.onDataset = (ds) => {
   const nums = ds.facets.filter((f) => ds.columns[f]?.kind === 'number');
   fillSelect(sortSel, ds.facets, app.defaultSort() ?? '', true);
   fillSelect(barSel, [...cats, ...nums], cats[0] ?? ds.facets[0]);
-  fillSelect(xSel, [...cats, ...nums], cats[0] ?? ds.facets[0]);
-  fillSelect(ySel, [...nums, ...cats], nums[0] ?? cats[1] ?? ds.facets[0]);
+  // The axis menus are filled once, by layout kind, in fillAxisSelects().
+  xSel.value = ySel.value = '';
   fillAxisSelects();
   colorSel.innerHTML =
     (ds.rgb ? `<option value="${TRUE_COLOUR}"${app.colorBy === TRUE_COLOUR ? ' selected' : ''}>True colour</option>` : '') +
-    ds.facets.map((f) => `<option value="${f}"${f === app.colorBy ? ' selected' : ''}>${f}</option>`).join('');
+    ds.facets.map((f) => `<option value="${esc(f)}"${f === app.colorBy ? ' selected' : ''}>${esc(f)}</option>`).join('');
   facets.colorBy = app.colorBy;
   facets.setDataset(ds);
   renderLegend();
-  detailEl.hidden = true;
   selected = -1;
+  detail.hide();
 };
 
-app.onLayout = (x, y) => axes.set(x, y);
+app.onLayout = (x, y) => {
+  axes.set(x, y);
+  // After the solve, so the tooltip reflects the layout now on screen (isRasterView).
+  describeZoom();
+};
 
 app.onSelect = (i) => {
   if (selected >= 0) { app.renderer.setSelected(selected, false); app.renderer.uploadStyleAt(selected); }
+  window.clearTimeout(openTimer);
   selected = i;
-  if (i >= 0) {
-    app.renderer.setSelected(i, true);
-    app.renderer.uploadStyleAt(i);
-    const [wx, wy] = [app.renderer.positionOf(i)[0], app.renderer.positionOf(i)[1]];
-    if (app.camera.current.zoom < 60) app.camera.focus(wx, wy, 90);
+  const ds = app.dataset;
+  if (i < 0 || !ds) { detail.hide(); return; }
+  app.renderer.setSelected(i, true);
+  app.renderer.uploadStyleAt(i);
+  // Fly to the card first when it is a speck, and open the modal only once the
+  // flight lands: the dialog expands out of the card, so the card has to be
+  // where the user is looking when it does.
+  const [wx, wy] = app.renderer.positionOf(i);
+  const ms = app.camera.current.zoom < 60 ? tweenMs(650) : 0;
+  if (ms > 0) {
+    app.camera.focus(wx, wy, 90, ms);
+    openTimer = window.setTimeout(() => { if (selected === i) detail.show(ds, i, app.colorBy); }, ms);
+  } else {
+    detail.show(ds, i, app.colorBy);
   }
-  showDetail(i);
+};
+
+// ---- hover and keyboard: what a card says, as text.
+//
+// The chip and the live region read the *compiled card model*, so they can
+// never drift from what the card itself paints.
+const chip = $('cursorChip');
+const live = $('cardLive');
+let textModel: CardModel | null = null;
+let textModelKey = '';
+function cardText(i: number) {
+  const ds = app.dataset;
+  if (!ds || i < 0) return null;
+  const key = `${ds.name}\u0000${app.colorBy}`;
+  if (!textModel || key !== textModelKey) {
+    textModel = compileCard(ds, ds.card, app.colorBy);
+    textModelKey = key;
+  }
+  return cardTextOf(textModel, i);
+}
+
+let pointerAt = { x: 0, y: 0 };
+canvas.addEventListener('pointermove', (e) => {
+  pointerAt = { x: e.clientX, y: e.clientY };
+  if (!chip.hidden) placeChip();
+}, { passive: true });
+
+function placeChip() {
+  const r = chip.getBoundingClientRect();
+  chip.style.left = `${Math.round(Math.min(pointerAt.x + 14, window.innerWidth - r.width - 8))}px`;
+  chip.style.top = `${Math.round(Math.min(pointerAt.y + 16, window.innerHeight - r.height - 8))}px`;
+}
+
+app.onHover = (i, readable) => {
+  // Above the LOD band the card is already saying this; the chip would only
+  // be repeating it over the top of the thing it describes.
+  const t = readable ? null : cardText(i);
+  if (!t) { chip.hidden = true; return; }
+  chip.innerHTML = `<b>${esc(t.title)}</b>${t.topic ? ` <span>${esc(t.topic)}</span>` : ''}`;
+  chip.hidden = false;
+  placeChip();
+};
+
+app.onFocusCard = (i) => {
+  const t = cardText(i);
+  live.textContent = t ? [t.title, t.topic, ...t.tags].filter(Boolean).join(', ') : '';
 };
 
 app.onFrame = (stats, model) => {
@@ -201,13 +311,33 @@ app.onFrame = (stats, model) => {
   axes.render(app.camera.current, canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio || 1);
 };
 
-facets.onChange = () => { void app.setMask(facets.mask()); };
+facets.onChange = () => {
+  // Same failure path as apply(): a worker that rejects the re-solve (D-04)
+  // becomes a toast, not an unhandled rejection.
+  app.setMask(facets.mask()).catch((err: unknown) => {
+    toast(`Filter failed: ${err instanceof Error ? err.message : String(err)}`, 8000);
+  });
+};
 
 $('layoutSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
   setLayoutKind(btn.dataset.layout as LayoutSpec['type']);
   void apply(true);
+});
+// Tabs move with the arrow keys, Home and End; Tab leaves the group (roving tabindex).
+$('layoutSeg').addEventListener('keydown', (e) => {
+  const tabs = Array.from($('layoutSeg').querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+  const i = tabs.indexOf(e.target as HTMLButtonElement);
+  if (i < 0) return;
+  const next =
+    e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % tabs.length :
+    e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? (i + tabs.length - 1) % tabs.length :
+    e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+  if (next < 0) return;
+  e.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
 });
 
 sortSel.addEventListener('change', () => { sortPinned = true; void apply(true); });
@@ -224,7 +354,9 @@ colorSel.addEventListener('change', () => {
     void apply(true);
   }
 });
-datasetSel.addEventListener('change', () => void load(datasetSel.value));
+// load() has already toasted and reverted the menu on failure; the rethrow is
+// for boot() and the tour, so swallow it here rather than leak an unhandled rejection.
+datasetSel.addEventListener('change', () => { load(datasetSel.value).catch(() => {}); });
 const METRICS_KEY = 'pivot.metrics';
 function setMetrics(on: boolean) {
   $('hud').style.display = on ? '' : 'none';
@@ -242,13 +374,42 @@ $('zoomIn').addEventListener('click', () => app.zoomStep(1));
 $('zoomOut').addEventListener('click', () => app.zoomStep(-1));
 $('fitBtn').addEventListener('click', () => app.fit());
 
+// ------------------------------------------------------------------- tour
+
+/** Everything the guided tour may do, routed through the same handlers a user would trigger. */
+const tourHost: TourHost & { tweenMs(ms: number): number } = {
+  app,
+  loadDataset: (key) => load(key),
+  async setLayout(kind) {
+    const btn = $('layoutSeg').querySelector<HTMLButtonElement>(`[data-layout="${kind}"]`);
+    btn?.click();
+    await lastApply;
+  },
+  async setSelect(id, value) {
+    const sel = $<HTMLSelectElement>(id);
+    if (!Array.from(sel.options).some((o) => o.value === value)) return;
+    sel.value = value;
+    sel.dispatchEvent(new Event('change'));
+    await lastApply;
+  },
+  toggleFacet: (field, label) => facets.toggle(field, label),
+  clearFacets: () => facets.clearAll(),
+  select: (i) => app.onSelect?.(i),
+  el: (selector) => document.querySelector(selector),
+  resetCardSettings: () => cardPanel.reset(),
+  tweenMs,
+};
+$('tourBtn').addEventListener('click', () => startTour(tourHost, { force: true }));
+exposeTour(tourHost);
+
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement).tagName === 'SELECT') return;
   if (e.key === 'f') app.fit();
   if (e.key === 'm') setMetrics((metricsOn = !metricsOn));
   if (e.key === '+' || e.key === '=') app.zoomStep(1);
   if (e.key === '-' || e.key === '_') app.zoomStep(-1);
-  if (e.key === 'Escape') { detailEl.hidden = true; }
+  // The dialog is modal: Escape belongs to it and nothing behind it.
+  if (e.key === 'Escape' && detail.visible) { e.stopPropagation(); detail.hide(); }
 });
 
 function setLayoutKind(kind: LayoutSpec['type']) {
@@ -257,10 +418,10 @@ function setLayoutKind(kind: LayoutSpec['type']) {
     const on = b.dataset.layout === kind;
     b.classList.toggle('active', on);
     b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
   }
   fillAxisSelects();
   updateControls();
-  describeZoom();
 }
 
 function describeZoom() {
@@ -270,23 +431,66 @@ function describeZoom() {
       : 'Zoom in and out';
 }
 
+/**
+ * Point the menu at `key`. A deep link can name a size the menu does not offer
+ * (`?dataset=tax-cases:5000`) or an unknown key that resolves to the default;
+ * rather than leave the select blank, show the collection actually loaded.
+ */
+function selectDatasetOption(key: string, sel: HTMLSelectElement = datasetSel) {
+  const has = (v: string) => Array.from(sel.options).some((o) => o.value === v);
+  if (has(key)) { sel.value = key; return; }
+  if (!familyOf(key)) { sel.value = DEFAULT_DATASET_KEY; return; }
+  // A known family at an off-menu size: add a temporary entry for it.
+  const opt = document.createElement('option');
+  opt.value = key;
+  opt.textContent = describeKey(key);
+  opt.dataset.temp = '1';
+  const group = Array.from(sel.querySelectorAll('optgroup')).find((g) => g.label === familyOf(key)!.label);
+  (group ?? sel).appendChild(opt);
+  sel.value = key;
+}
+
+/** The key of the collection on screen, so a failed load can put the menu back. */
+let loadedKey = '';
+/** Newest load wins; an older one that finishes late must not touch the chrome. */
+let loadSeq = 0;
+
+/**
+ * Load a collection and open it on its default layout (map, picture or sorted
+ * grid — `app.defaultLayout()`), solved once by `loadDataset`. `onDataset`
+ * fills the menus; the layout kind and axes are set to match afterwards.
+ * A failure (fetch, decode, a layout the worker rejects) becomes a toast and
+ * the menu goes back to the collection still on screen; the error is rethrown
+ * so `boot()` and the tour can see it.
+ */
 async function load(key: string) {
+  const seq = ++loadSeq;
+  const prev = loadedKey;
   sortPinned = false;
   // Keep the menu honest when the collection came from ?dataset= rather than a click.
-  if (datasetSel.value !== key) datasetSel.value = key;
-  toast(`Building ${key.startsWith('products') ? Number(key.split(':')[1]).toLocaleString() + ' cards' : 'the Titanic collection'}…`, 1400);
+  if (datasetSel.value !== key) selectDatasetOption(key);
+  toast(`Building ${describeKey(key)}…`, 1400);
   const t0 = performance.now();
-  await app.loadDataset(key);
-  // Open a pixel collection as the picture it came from.
-  if (app.dataset?.rgb && app.dataset.columns['X'] && app.dataset.columns['Y']) {
-    xSel.value = 'X';
-    ySel.value = 'Y';
-    setLayoutKind('xy');
-    await apply(true);
-  } else {
-    setLayoutKind('grid');
+  try {
+    // No `initial`: the menus belong to the old collection until onDataset
+    // runs, so the opening layout is app.defaultLayout(), solved once inside.
+    await app.loadDataset(key);
+    if (seq !== loadSeq) return;
+    const spec = app.defaultLayout();
+    if (spec.type === 'xy') {
+      setLayoutKind('xy');
+      xSel.value = spec.x;
+      ySel.value = spec.y;
+    } else {
+      setLayoutKind('grid');
+    }
+    loadedKey = key;
+    toast(`${app.dataset!.n.toLocaleString()} cards ready in ${(performance.now() - t0).toFixed(0)} ms`, 2000);
+  } catch (err) {
+    if (seq === loadSeq && prev) datasetSel.value = prev;
+    toast(`Could not load ${describeKey(key)}: ${err instanceof Error ? err.message : String(err)}`, 8000);
+    throw err;
   }
-  toast(`${app.dataset!.n.toLocaleString()} cards ready in ${(performance.now() - t0).toFixed(0)} ms`, 2000);
 }
 
 // ---------------------------------------------------------------- benchmark
@@ -294,10 +498,10 @@ async function load(key: string) {
 function reportTable(result: BenchResult): string {
   const rows: string[] = [];
   for (const run of result.runs) {
-    rows.push(`<tr class="head"><td colspan="6">${run.dataset} — ${run.n.toLocaleString()} cards</td></tr>`);
+    rows.push(`<tr class="head"><td colspan="6">${esc(run.dataset)} — ${run.n.toLocaleString()} cards</td></tr>`);
     for (const p of run.phases) {
       rows.push(
-        `<tr><td>${p.name}</td><td>${p.fps.toFixed(1)}</td><td>${p.p50.toFixed(2)}</td>` +
+        `<tr><td>${esc(p.name)}</td><td>${p.fps.toFixed(1)}</td><td>${p.p50.toFixed(2)}</td>` +
         `<td>${p.p95.toFixed(2)}</td><td>${p.worst.toFixed(1)}</td><td>${p.frames}</td></tr>`,
       );
     }
@@ -306,11 +510,11 @@ function reportTable(result: BenchResult): string {
   return `
     <header>
       <h2>Benchmark</h2>
-      <span style="color:var(--ink-3)">${result.env.renderer}</span>
+      <span style="color:var(--ink-3)">${esc(String(result.env.renderer))}</span>
       <span class="spacer" style="flex:1"></span>
-      <button data-copy>Copy JSON</button>
-      <button data-download>Download</button>
-      <button data-close>Close</button>
+      <button type="button" data-copy>Copy JSON</button>
+      <button type="button" data-download>Download</button>
+      <button type="button" data-close>Close</button>
     </header>
     <div class="body">
       ${soft ? '<p class="warn">Software renderer — these numbers are CPU-rasterised and not representative of this machine’s GPU.</p>' : ''}
@@ -359,12 +563,13 @@ declare global {
 
 async function boot() {
   try {
-    await load(benchMode ? 'titanic' : (params.get('dataset') ?? 'titanic'));
+    await load(benchMode ? 'tax-cases:900' : (params.get('dataset') ?? DEFAULT_DATASET_KEY));
     app.start();
     window.pivot = app;
     window.runPivotBench = (opts) =>
       runBench(app, { sizes: opts?.sizes ?? [1000, 10_000, 100_000, 500_000, 1_000_000] });
     window.pivotBenchReady = true;
+    if (!benchMode && shouldAutoStart(params)) startTour(tourHost);
   } catch (err) {
     toast(String(err), 20_000);
     throw err;

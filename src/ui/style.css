@@ -129,6 +129,7 @@ button.ghost { background: transparent; }
   background: var(--surface-3); border-radius: 2px; overflow: hidden;
 }
 .facet-row .bar i { display: block; height: 100%; background: var(--ink-3); opacity: .55; }
+.facet-more { padding: 3px 0 0 21px; color: var(--ink-3); font-size: 11px; }
 
 /* ---------- stage ---------- */
 .stage { grid-area: stage; position: relative; overflow: hidden; background: var(--surface-0); }
@@ -168,25 +169,169 @@ button.ghost { background: transparent; }
 .hud .row b { color: var(--ink-2); font-weight: 500; }
 .hud .spark { display: block; margin: 6px 0 5px; width: 184px; height: 26px; }
 
+/* A canvas can never be accessible on its own; these carry the same
+   information as text for anyone not looking at the pixels. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Below the LOD band a card is a dot and cannot say who it is; this does. */
+.cursor-chip {
+  position: fixed; z-index: 20; pointer-events: none;
+  padding: 5px 9px; border-radius: 6px; max-width: 260px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  box-shadow: 0 8px 20px rgba(0,0,0,.45);
+  font-size: 12px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cursor-chip[hidden] { display: none; }
+.cursor-chip b { font-weight: 600; }
+.cursor-chip span { color: var(--ink-3); }
+
+/* ---------- card settings ---------- */
+.popover-host { position: relative; display: inline-flex; }
+/* Fixed, and placed from the button's rect on open: the top bar is an
+   `overflow-x: auto` scroll container, which clips a popover in both axes. */
+.popover {
+  position: fixed; z-index: 45; width: 268px;
+  padding: 10px 12px; display: grid; gap: 8px;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.5);
+}
+.popover[hidden] { display: none; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.set-label { color: var(--ink-3); font-size: 12px; }
+.set-row .seg { flex: 0 0 auto; }
+.set-row .ghost { min-width: 54px; }
+.set-row select { max-width: 140px; }
+.set-row button[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* ---------- record modal ---------- */
+/* The dialog is centred by the overlay's grid rather than by a transform:
+   the FLIP owns `transform`, and a resting transform would have to be carried
+   through every inverted state. The scrim and the toast are fixed, so they sit
+   outside the grid flow and are not centred with it. */
+#overlay { position: fixed; inset: 0; z-index: 40; pointer-events: none; display: grid; place-items: center; }
+#overlay > * { pointer-events: auto; }
+#overlay [hidden] { display: none; }
+
+.scrim { position: fixed; inset: 0; background: rgba(8,8,7,.62); backdrop-filter: blur(1.5px); }
+
 .detail {
-  position: absolute; top: 12px; right: 12px; width: 292px;
-  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+  position: relative;
+  width: min(720px, calc(100vw - 48px)); max-height: min(86vh, 760px);
+  display: flex; flex-direction: column;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 28px 72px rgba(0,0,0,.62);
   overflow: hidden;
 }
-.detail header { padding: 14px 15px; color: #fff; }
-.detail header h2 { margin: 0; font-size: 15px; }
-.detail header p { margin: 3px 0 0; font-size: 12px; opacity: .82; }
-.detail dl { margin: 0; padding: 10px 15px 14px; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; }
-.detail dt { color: var(--ink-3); font-size: 11.5px; }
-.detail dd { margin: 0; text-align: right; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.detail.opening { transition: transform var(--flip-ms, 260ms) cubic-bezier(.2,.8,.2,1), opacity var(--flip-ms, 260ms) ease-out; }
+
+.detail header {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px;
+  padding: 18px 52px 18px 20px; color: #fff;
+}
+.detail header .tile {
+  width: 44px; height: 44px; border-radius: 9px; display: grid; place-items: center;
+  background: rgba(0,0,0,.26); font-weight: 600; font-size: 16px; letter-spacing: .5px;
+}
+.detail header .topic { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; opacity: .82; }
+.detail header h2 { margin: 0; font-size: 20px; line-height: 1.2; }
+.detail header .sub { margin: 3px 0 0; font-size: 12.5px; opacity: .85; }
+.detail header .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.detail header .chip {
+  padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
+  background: rgba(0,0,0,.26);
+}
+
+.detail .body { overflow: auto; padding: 4px 20px 20px; }
+.detail .body section { padding: 14px 0; border-bottom: 1px solid var(--surface-2); }
+.detail .body section:last-child { border-bottom: 0; }
+.detail h3 {
+  margin: 0 0 10px; font-size: 11px; font-weight: 500; text-transform: uppercase;
+  letter-spacing: .7px; color: var(--ink-3);
+}
+.detail .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.detail .summary .tile { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+.detail .summary .tile b { display: block; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.detail .summary .tile span { font-size: 11.5px; color: var(--ink-3); }
+
+.detail dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; }
+.detail dt { color: var(--ink-3); font-size: 12px; }
+.detail dd { margin: 0; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; }
+.detail dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.detail dd.tag { color: var(--ink-2); }
+
+.detail .context ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.detail .context li { display: grid; grid-template-columns: 92px 1fr 100px 38px; align-items: center; gap: 12px; }
+.detail .context .k { color: var(--ink-3); font-size: 12px; }
+.detail .context .v { font-size: 13px; }
+.detail .context .bar { height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.detail .context .bar i { display: block; height: 100%; background: var(--ink-3); }
+.detail .context .pct { text-align: right; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.detail .context .note { margin: 10px 0 0; font-size: 11.5px; color: var(--ink-3); }
+
+.detail .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.detail .actions a {
+  padding: 7px 13px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink-2); text-decoration: none; font-size: 12.5px;
+}
+.detail .actions a.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.detail .actions a:hover { border-color: var(--ink-3); }
+
+/* The tax-case renderer's own blocks. It supplies the middle of the modal;
+   the header, Context and Actions are the shared ones. */
+.detail .kv { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 18px; }
+.detail .kv.one { grid-template-columns: 1fr; }
+.detail .kv .fld { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.detail .kv .fld dd { text-align: right; }
+.detail h3 .ref { margin-left: 8px; color: var(--ink-2); text-transform: none; letter-spacing: 0; }
+.detail .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.detail .muted { color: var(--ink-3); }
+.detail .with-glyph { display: inline-flex; align-items: center; gap: 6px; }
+.detail .status { display: inline-flex; align-items: center; gap: 6px; }
+.detail .status i { width: 8px; height: 8px; border-radius: 50%; }
+.detail .chip {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px;
+  color: var(--chip, var(--ink-2)); border: 1px solid currentColor;
+}
+.detail .stars { color: var(--star, #c98500); letter-spacing: 1px; }
+.detail .stars .empty { color: var(--surface-3); }
+
+/* Journey: three nodes on one rule, the last one open-ended when the case is. */
+.detail .timeline {
+  list-style: none; margin: 0 0 14px; padding: 0;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; position: relative;
+}
+.detail .timeline::before {
+  content: ""; position: absolute; left: 6%; right: 6%; top: 5px; height: 2px;
+  background: linear-gradient(90deg, var(--surface-3), var(--surface-3));
+}
+.detail .timeline.open::before { background: linear-gradient(90deg, var(--surface-3) 60%, transparent); }
+.detail .timeline .node { position: relative; padding-top: 16px; text-align: center; }
+.detail .timeline .node i {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--surface-3); border: 2px solid var(--surface-1);
+}
+.detail .timeline .node.start i { background: var(--ink-3); }
+.detail .timeline .node.end i { background: var(--ink-2); }
+.detail .timeline.open .node.end i { background: var(--surface-3); }
+.detail .timeline .node b { display: block; font-size: 13px; font-weight: 600; }
+.detail .timeline .node small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ink-3); }
+
 .detail .close {
-  position: absolute; top: 8px; right: 8px; width: 24px; height: 24px;
-  border-radius: 5px; border: 0; background: rgba(0,0,0,.28); color: #fff; line-height: 1;
+  position: absolute; top: 12px; right: 12px; width: 28px; height: 28px;
+  border-radius: 6px; border: 0; background: rgba(0,0,0,.3); color: #fff; line-height: 1; font-size: 15px;
+}
+
+@media (max-width: 560px) {
+  .detail header { grid-template-columns: auto 1fr; padding-right: 48px; }
+  .detail header .chips { grid-column: 1 / -1; justify-content: flex-start; }
 }
 
 .toast {
-  position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+  position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
   padding: 8px 14px; border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2);
   box-shadow: 0 8px 24px rgba(0,0,0,.4);
@@ -210,5 +355,71 @@ button.ghost { background: transparent; }
 .report .warn { color: #e66767; }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast, .detail { transition: none; }
+  .toast, .detail, .detail.opening { transition: none; }
+}
+
+/* ---------- tour ---------- */
+/* Above #overlay (40): the tour frames the whole application, including the
+   record modal, and its controls have to stay clickable over the scrim. */
+.tour { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
+.tour-spot {
+  position: fixed; border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .6), 0 0 0 3px var(--accent), 0 0 24px 4px rgba(57, 135, 229, .55);
+  pointer-events: none;
+  transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease;
+}
+/* Following a card on the canvas: be on it, not behind it. */
+.tour-spot.tracking { transition: none; }
+/* The card sits beside whatever is spotlit; JS sets left/top and a side-* class. */
+.tour-card {
+  position: fixed; left: 0; top: 0;
+  width: min(440px, calc(100vw - 24px));
+  padding: 14px 18px 14px; border-radius: 12px;
+  background: var(--surface-3); border: 1.5px solid #4a4a46; color: var(--ink);
+  border-left: 5px solid var(--accent);
+  box-shadow: 0 18px 48px rgba(0,0,0,.7), 0 0 0 1px rgba(0,0,0,.6);
+  pointer-events: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: left .3s ease, top .3s ease;
+}
+.tour-card.floating { transition: none; }
+.tour-card h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.1px; }
+.tour-card h2[hidden] { display: none; }
+.tour-card p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--ink); }
+.tour-card.tour-welcome p { color: var(--ink-2); }
+.tour-caption b { color: #8fbdf5; font-weight: 700; }
+.tour-head { display: flex; align-items: center; justify-content: space-between; }
+.tour-step { color: var(--accent); font-size: 11.5px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; font-variant-numeric: tabular-nums; }
+.tour-foot { display: flex; align-items: center; gap: 8px; }
+.tour-foot .spacer { flex: 1; }
+.tour-card button {
+  font: inherit; font-size: 13.5px; font-weight: 600; padding: 7px 14px; border-radius: 6px;
+  border: 1px solid #4a4a46; background: var(--surface-2); color: var(--ink);
+  cursor: pointer;
+}
+.tour-card button:hover { background: var(--surface-1); }
+.tour-card button:disabled { opacity: .4; cursor: default; }
+.tour-card button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tour-card button.primary:hover { filter: brightness(1.12); }
+.tour-card button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.tour-mute { font-size: 11.5px !important; font-weight: 500 !important; padding: 3px 9px !important; }
+.tour-mute[aria-pressed="true"] { color: var(--ink-3); }
+/* Arrow: a rotated square on the edge facing the target. */
+.tour-arrow {
+  position: absolute; width: 16px; height: 16px; background: var(--surface-3);
+  border: 1.5px solid #4a4a46; transform: rotate(45deg); display: none;
+}
+.tour-card.side-below .tour-arrow { display: block; top: -9px; margin-left: -8px; border-right: 0; border-bottom: 0; }
+.tour-card.side-above .tour-arrow { display: block; bottom: -9px; margin-left: -8px; border-left: 0; border-top: 0; }
+.tour-card.side-right .tour-arrow { display: block; left: -9px; margin-top: -8px; border-right: 0; border-top: 0; }
+.tour-card.side-left .tour-arrow { display: block; right: -9px; margin-top: -8px; border-left: 0; border-bottom: 0; }
+.tour-card.side-right { border-left: 1.5px solid #4a4a46; border-top: 5px solid var(--accent); }
+.tour-card.side-left { border-left: 1.5px solid #4a4a46; border-right: 5px solid var(--accent); }
+.tour-welcome {
+  left: 50% !important; top: 50% !important; transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 24px)); transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot, .tour-card { transition: none; }
 }

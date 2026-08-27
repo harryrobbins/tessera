@@ -1,13 +1,22 @@
 import type { Dataset } from '../data/columnar';
 import { getNumeric, histogram, shortNumber } from '../data/columnar';
-import { categoricalColor } from '../core/palette';
+import { fieldColors } from '../core/palette';
+import { esc } from '../core/esc';
 
 export type FilterState = Map<string, Set<number>>;
+
+/** Categories listed per facet; the rest are summarised as "+N more". */
+export const MAX_ROWS = 24;
 
 /**
  * Facet sidebar. Counts are recomputed against the *other* facets' filters
  * (cross-filtering), so a category's number always answers "what would I get if
  * I ticked this?".
+ *
+ * The DOM is built once per dataset (`render`); a filter change only rewrites
+ * counts, bars and checked state in place (`update`), so the focused checkbox
+ * survives and keyboard users keep their place. Row order is therefore fixed
+ * at render time (by unfiltered count) rather than re-sorted on every tick.
  */
 export class FacetPanel {
   private el: HTMLElement;
@@ -38,7 +47,7 @@ export class FacetPanel {
     t.checked ? set.add(code) : set.delete(code);
     if (set.size === 0) this.filters.delete(field);
     this.onChange?.();
-    this.render();
+    this.update();
   };
 
   private onClick = (e: Event) => {
@@ -46,8 +55,30 @@ export class FacetPanel {
     if (t.tagName !== 'BUTTON' || !t.dataset.clear) return;
     this.filters.delete(t.dataset.clear);
     this.onChange?.();
-    this.render();
+    this.update();
   };
+
+  /** Tick or untick one category by its label, exactly as a click would. */
+  toggle(field: string, label: string): void {
+    const col = this.ds?.columns[field];
+    if (!col || col.kind !== 'category') return;
+    const code = col.categories.indexOf(label);
+    if (code < 0) return;
+    let set = this.filters.get(field);
+    if (!set) { set = new Set(); this.filters.set(field, set); }
+    set.has(code) ? set.delete(code) : set.add(code);
+    if (set.size === 0) this.filters.delete(field);
+    this.onChange?.();
+    this.update();
+  }
+
+  /** Drop every filter, as if each clear link had been clicked. */
+  clearAll(): void {
+    if (this.filters.size === 0) return;
+    this.filters = new Map();
+    this.onChange?.();
+    this.update();
+  }
 
   /** Rows passing every active filter. Returns null when nothing is filtered. */
   mask(): Uint8Array | null {
@@ -81,6 +112,7 @@ export class FacetPanel {
     return m;
   }
 
+  /** Rebuild the sidebar from scratch: on dataset change, or when the colour field changes. */
   render() {
     const ds = this.ds;
     if (!ds) return;
@@ -89,28 +121,26 @@ export class FacetPanel {
       const col = ds.columns[field];
       if (!col) continue;
       if (col.kind === 'category') {
-        const counts = histogram(col, this.maskExcept(field) ?? undefined);
-        const max = Math.max(1, ...counts);
-        const active = this.filters.get(field);
+        const counts = histogram(col);
         const order = Array.from(counts, (c, i) => [c, i] as [number, number])
           .sort((a, b) => b[0] - a[0])
-          .slice(0, 24);
-        parts.push(`<section class="facet"><h3>${esc(field)}${
-          active ? `<button data-clear="${esc(field)}">clear</button>` : ''
-        }</h3>`);
-        for (const [count, code] of order) {
-          const checked = active?.has(code) ? 'checked' : '';
+          .slice(0, MAX_ROWS);
+        const hidden = counts.length - order.length;
+        parts.push(`<section class="facet" data-field="${esc(field)}"><h3>${esc(field)}<button data-clear="${esc(field)}" hidden>clear</button></h3>`);
+        const swatches = this.colorBy === field ? fieldColors(ds, field) : [];
+        for (const [, code] of order) {
           const swatch = this.colorBy === field
-            ? `<i class="swatch" style="background:${categoricalColor(code)}"></i>` : '';
+            ? `<i class="swatch" style="background:${swatches[code]}"></i>` : '';
           parts.push(
             `<label class="facet-row">
-               <input type="checkbox" data-field="${esc(field)}" data-code="${code}" ${checked}>
+               <input type="checkbox" data-field="${esc(field)}" data-code="${code}" data-label="${esc(col.categories[code] ?? '')}">
                <span class="label">${swatch}${esc(col.categories[code] ?? '—')}</span>
-               <span class="count">${count.toLocaleString()}</span>
-               <span class="bar"><i style="width:${(count / max) * 100}%"></i></span>
+               <span class="count"></span>
+               <span class="bar"><i></i></span>
              </label>`,
           );
         }
+        if (hidden > 0) parts.push(`<div class="facet-more">+${hidden.toLocaleString()} more</div>`);
         parts.push('</section>');
       } else if (col.kind === 'number') {
         const n = getNumeric(ds, field);
@@ -125,9 +155,35 @@ export class FacetPanel {
       }
     }
     this.el.innerHTML = parts.join('');
+    this.update();
   }
-}
 
-function esc(s: string) {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+  /** Refresh counts, bars, ticks and clear buttons without touching the DOM structure. */
+  update() {
+    const ds = this.ds;
+    if (!ds) return;
+    const sections = this.el.querySelectorAll<HTMLElement>('section.facet[data-field]');
+    for (const section of sections) {
+      const field = section.dataset.field!;
+      const col = ds.columns[field];
+      if (!col || col.kind !== 'category') continue;
+      const counts = histogram(col, this.maskExcept(field) ?? undefined);
+      let max = 1;
+      for (let i = 0; i < counts.length; i++) if (counts[i] > max) max = counts[i];
+      const active = this.filters.get(field);
+      const clear = section.querySelector<HTMLButtonElement>('button[data-clear]');
+      if (clear) clear.hidden = !active;
+      for (const input of section.querySelectorAll<HTMLInputElement>('input[data-code]')) {
+        const code = Number(input.dataset.code);
+        const count = counts[code] ?? 0;
+        const checked = active?.has(code) ?? false;
+        if (input.checked !== checked) input.checked = checked;
+        const row = input.parentElement!;
+        const countEl = row.querySelector<HTMLElement>('.count')!;
+        const text = count.toLocaleString();
+        if (countEl.textContent !== text) countEl.textContent = text;
+        row.querySelector<HTMLElement>('.bar i')!.style.width = `${(count / max) * 100}%`;
+      }
+    }
+  }
 }

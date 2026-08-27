@@ -7,11 +7,13 @@ export class FrameStats {
   private i = 0;
   private filled = 0;
   private sorted: Float32Array;
+  private chrono: Float32Array;
   frames = 0;
 
   constructor(window = 180) {
     this.buf = new Float32Array(window);
     this.sorted = new Float32Array(window);
+    this.chrono = new Float32Array(window);
   }
 
   push(dtMs: number) {
@@ -53,11 +55,11 @@ export class FrameStats {
     return w;
   }
 
-  /** Frame durations in chronological order. */
-  history(): number[] {
-    const out: number[] = [];
+  /** Frame durations in chronological order. Returns a reused view: read it before the next call. */
+  history(): Float32Array {
+    const out = this.chrono.subarray(0, this.filled);
     for (let k = 0; k < this.filled; k++) {
-      out.push(this.buf[(this.i - this.filled + k + this.buf.length * 2) % this.buf.length]);
+      out[k] = this.buf[(this.i - this.filled + k + this.buf.length * 2) % this.buf.length];
     }
     return out;
   }
@@ -79,15 +81,14 @@ export interface HudModel {
 
 /** The bottom-left readout: big FPS number, frame-time sparkline, cost breakdown. */
 export class Hud {
-  private el: HTMLElement;
   private fpsEl: HTMLElement;
   private spark: HTMLCanvasElement;
   private sctx: CanvasRenderingContext2D;
   private rows: HTMLElement;
+  private cells = new Map<string, HTMLElement>();
   private last = 0;
 
   constructor(el: HTMLElement) {
-    this.el = el;
     el.innerHTML = `
       <div class="fps"><span data-fps>—</span><small>fps</small></div>
       <canvas class="spark" width="368" height="52"></canvas>
@@ -110,19 +111,36 @@ export class Hud {
     this.fpsEl.parentElement!.style.color =
       fps >= 55 ? '#199e70' : fps >= 30 ? '#c98500' : '#e66767';
 
-    this.rows.innerHTML = [
-      row('cards', model.items.toLocaleString()),
-      row('shown', model.visible.toLocaleString()),
-      row('frame p50 / p95', `${stats.percentile(0.5).toFixed(1)} / ${stats.percentile(0.95).toFixed(1)} ms`),
-      row('gpu frame', model.gpuMs >= 0 ? `${model.gpuMs.toFixed(2)} ms` : 'n/a'),
-      row('layout solve', `${model.solveMs.toFixed(1)} ms`),
-      row('gpu upload', `${model.uploadMs.toFixed(1)} ms`),
-      row('draw calls', '1'),
-      row('device', `${model.dpr}x · ${model.buffer[0]}×${model.buffer[1]}`),
-      ...(model.scale === null ? [] : [row('scale', fmtScale(model.scale))]),
-    ].join('');
+    this.row('cards', model.items.toLocaleString());
+    this.row('shown', model.visible.toLocaleString());
+    this.row('frame p50 / p95', `${stats.percentile(0.5).toFixed(1)} / ${stats.percentile(0.95).toFixed(1)} ms`);
+    this.row('gpu frame', model.gpuMs >= 0 ? `${model.gpuMs.toFixed(2)} ms` : 'n/a');
+    this.row('layout solve', `${model.solveMs.toFixed(1)} ms`);
+    this.row('gpu upload', `${model.uploadMs.toFixed(1)} ms`);
+    this.row('draw calls', '1');
+    this.row('device', `${model.dpr}x · ${model.buffer[0]}×${model.buffer[1]}`);
+    this.row('scale', model.scale === null ? null : fmtScale(model.scale));
 
     this.drawSpark(stats);
+  }
+
+  /** Rows are created once and their text nodes updated in place; `null` hides a row. */
+  private row(label: string, value: string | null) {
+    let cell = this.cells.get(label);
+    if (!cell) {
+      const div = document.createElement('div');
+      div.className = 'row';
+      const span = document.createElement('span');
+      span.textContent = label;
+      cell = document.createElement('b');
+      div.append(span, cell);
+      this.rows.appendChild(div);
+      this.cells.set(label, cell);
+    }
+    const div = cell.parentElement!;
+    if (value === null) { div.hidden = true; return; }
+    div.hidden = false;
+    if (cell.textContent !== value) cell.textContent = value;
   }
 
   private drawSpark(stats: FrameStats) {
@@ -158,10 +176,6 @@ export class Hud {
     c.fillStyle = 'rgba(57,135,229,0.16)';
     c.fill();
   }
-
-  setGpu(name: string) {
-    this.el.title = name;
-  }
 }
 
 /** Device pixels per cell: 2 reads as 2:1, 0.5 as 1:2. */
@@ -169,8 +183,4 @@ function fmtScale(s: number): string {
   const exact = Math.abs(s - Math.round(s)) < 0.01 || Math.abs(1 / s - Math.round(1 / s)) < 0.01;
   const text = s >= 1 ? `${s.toFixed(s % 1 ? 2 : 0)}:1` : `1:${(1 / s).toFixed((1 / s) % 1 ? 2 : 0)}`;
   return exact ? text : `${text} (fractional)`;
-}
-
-function row(label: string, value: string) {
-  return `<div class="row"><span>${label}</span><b>${value}</b></div>`;
 }
