@@ -86,11 +86,18 @@ def run_mask_generator(model, image_path: Path, imgsz: int, conf: float, iou: fl
     return masks, scores
 
 
-def dedup(masks: np.ndarray, scores: np.ndarray, areas: np.ndarray) -> list[int]:
+def dedup(masks: np.ndarray, scores: np.ndarray, areas: np.ndarray, strided: bool = False) -> list[int]:
     """Greedy NMS over masks: process highest-confidence first, drop any
     mask that overlaps a kept one too much (same object proposed twice) or
-    that is almost entirely contained in a kept one at a similar scale."""
-    small = masks[:, ::DEDUP_STRIDE, ::DEDUP_STRIDE].reshape(masks.shape[0], -1)
+    that is almost entirely contained in a kept one at a similar scale.
+
+    Pass `strided=True` when `masks` is already downsampled by DEDUP_STRIDE
+    (the caller does that before selecting a subset, so the full-resolution
+    stack is never copied)."""
+    if strided:
+        small = masks.reshape(masks.shape[0], -1)
+    else:
+        small = masks[:, ::DEDUP_STRIDE, ::DEDUP_STRIDE].reshape(masks.shape[0], -1)
     small_areas = small.sum(axis=1)
     order = np.argsort(-scores)
 
@@ -221,7 +228,10 @@ def main() -> int:
         log(f"  {len(big_enough)} survive the min-area filter")
 
         t0 = time.time()
-        kept = dedup(masks[big_enough], scores[big_enough], areas[big_enough])
+        # `masks[big_enough]` would copy the full N×H×W bool stack (~900 MB for
+        # 300 proposals on a plate); downsample first, then select.
+        small = masks[:, ::DEDUP_STRIDE, ::DEDUP_STRIDE][big_enough]
+        kept = dedup(small, scores[big_enough], areas[big_enough], strided=True)
         kept = [int(big_enough[i]) for i in kept]
         log(f"  {len(kept)} survive dedup ({time.time() - t0:.1f}s)")
 

@@ -1,6 +1,6 @@
 # Image credits
 
-Both files are faithful photographic reproductions of two-dimensional works in
+All three files are faithful photographic reproductions of two-dimensional works in
 the **public domain** (author died more than 100 years ago), sourced from
 Wikimedia Commons.
 
@@ -14,4 +14,4 @@ They are used here only as sample data for the pixel collection.
 
 `millot-papillons.jpg` additionally ships a SAM-generated segmentation mask
 (`millot-papillons.segments.png` + `.segments.json`, produced by `pipeline/`)
-identifying each of the ~40 discrete specimens on the plate.
+identifying 58 discrete specimens on the plate.
