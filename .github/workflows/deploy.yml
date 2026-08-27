@@ -3,17 +3,17 @@ name: Deploy demo to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
+# PR builds get read-only; the Pages/OIDC grants live on the deploy job.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Only one Pages deploy in flight at a time; a newer push wins over one
 # still building rather than racing it live.
 concurrency:
-  group: pages
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -34,13 +34,34 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-      - uses: actions/upload-pages-artifact@v3
+      # Pages serves the demo at /tessera/, not the domain root. Serve dist/
+      # under that mount and check the app boots, loads its worker and data,
+      # and switches to a pixel collection — the cases a wrong base breaks.
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Sub-path smoke test
+        run: |
+          pnpm exec vite preview --base /tessera/ --port 4173 --strictPort >preview.log 2>&1 &
+          PREVIEW=$!
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4173/tessera/ >/dev/null && break; sleep 1; done
+          node scripts/_verify-subpath.mjs http://127.0.0.1:4173/tessera/ --swiftshader
+          STATUS=$?
+          kill $PREVIEW || true
+          cat preview.log
+          exit $STATUS
+
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
+    # PRs build and smoke-test only; only a push to main goes live.
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
