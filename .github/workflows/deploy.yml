@@ -20,11 +20,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -40,12 +40,28 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Sub-path smoke test
         run: |
-          pnpm exec vite preview --base /tessera/ --port 4173 --strictPort >preview.log 2>&1 &
+          # --host 127.0.0.1, explicitly: `vite preview` otherwise binds
+          # whatever `localhost` resolves to first, which on the runner is ::1,
+          # and every client here asks for 127.0.0.1 and is refused.
+          pnpm exec vite preview --base /tessera/ --host 127.0.0.1 --port 4173 --strictPort >preview.log 2>&1 &
           PREVIEW=$!
-          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4173/tessera/ >/dev/null && break; sleep 1; done
-          node scripts/_verify-subpath.mjs http://127.0.0.1:4173/tessera/ --swiftshader
-          STATUS=$?
-          kill $PREVIEW || true
+          up=
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/tessera/ >/dev/null; then up=1; break; fi
+            sleep 1
+          done
+          # The step runs under `bash -e`: without this the smoke test's own
+          # exit status aborts the step before the server log is printed, which
+          # is exactly the log that says why it failed.
+          set +e
+          if [ -z "$up" ]; then
+            echo "preview server never answered on http://127.0.0.1:4173/tessera/"
+            STATUS=1
+          else
+            node scripts/_verify-subpath.mjs http://127.0.0.1:4173/tessera/ --swiftshader
+            STATUS=$?
+          fi
+          kill $PREVIEW 2>/dev/null || true
           cat preview.log
           exit $STATUS
 
