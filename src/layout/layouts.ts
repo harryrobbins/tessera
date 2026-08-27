@@ -6,9 +6,15 @@
  * (the "object permanence" that made Pivot readable).
  */
 import { sortByCode, sortByNumeric } from './sort';
+import { shortNumber } from '../data/columnar';
 
 export const CARD_PITCH = 1;
 export const CARD_SIZE = 0.86;
+/** Equal-aspect map: the longer side of a 900-row map in world units, before the
+ *  viewport-aspect and row-count factors of mapScale(). */
+export const MAP_SPAN = 240;
+/** Card size on the map — a light, not a tile; cards reveal themselves on zoom. */
+export const MAP_DOT = 0.7;
 /** Extra horizontal room each bar's gap adds, as a multiple of its width. */
 const BAR_GAP = 0.25;
 
@@ -16,7 +22,7 @@ export type LayoutSpec =
   | { type: 'grid'; sortBy?: string }
   | { type: 'bars'; by: string; bins?: number; sortBy?: string }
   | { type: 'scatter'; x: string; y: string; xBins?: number; yBins?: number; sortBy?: string }
-  | { type: 'xy'; x: string; y: string };
+  | { type: 'xy'; x: string; y: string; equal?: boolean };
 
 export interface AxisTick { pos: number; label: string; count?: number }
 export interface Axis { title: string; ticks: AxisTick[] }
@@ -27,6 +33,12 @@ export interface LayoutResult {
   positions: Float32Array;
   bounds: Bounds;
   visible: number;
+  /** World units per card cell — what one card's footprint measures, so the
+   *  device-pixels-per-cell readout is `zoom * pitch` whatever is masked. */
+  pitch: number;
+  /** World units a card is drawn at (CARD_SIZE, or the map dot / full pitch
+   *  for a raster) — read this, never card 0's slot, which may be masked to 0. */
+  cardSize: number;
   xAxis?: Axis;
   yAxis?: Axis;
 }
@@ -76,6 +88,20 @@ export function bucketize(
   if (col.kind === 'category') return { codes: col.codes, labels: col.categories };
   if (col.kind === 'text') throw new Error(`cannot bucket text column ${field}`);
   const { values, min, max } = col;
+  // An integer column with no more distinct values than bins (Year: 16 values)
+  // gets one bin per integer, so every bar holds exactly one value instead of
+  // some holding one year and some two.
+  if (Number.isInteger(min) && Number.isInteger(max) && max - min + 1 <= bins && isIntegerColumn(values)) {
+    const codes = new Int32Array(values.length);
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      codes[i] = Number.isFinite(v) ? v - min : -1;
+    }
+    const labels: string[] = [];
+    // Plain integers: a year must read "2007", not "2.0k".
+    for (let v = min; v <= max; v++) labels.push(String(v));
+    return { codes, labels };
+  }
   const span = max - min || 1;
   const codes = new Int32Array(values.length);
   for (let i = 0; i < values.length; i++) {
@@ -94,13 +120,39 @@ export function bucketize(
   return { codes, labels };
 }
 
-function fmtTick(v: number): string {
-  const a = Math.abs(v);
-  if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B';
-  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
-  if (a >= 1e3) return (v / 1e3).toFixed(0) + 'k';
-  if (a >= 10 || Number.isInteger(v)) return v.toFixed(0);
-  return v.toFixed(1);
+function isIntegerColumn(values: Float32Array): boolean {
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (Number.isFinite(v) && !Number.isInteger(v)) return false;
+  }
+  return true;
+}
+
+/** Tick and bin labels share the dataset's own number formatter. */
+const fmtTick = shortNumber;
+
+/**
+ * Equal-aspect scale for a longitude × latitude scatter: one world unit per
+ * degree of latitude times a shared factor, with longitude shrunk by
+ * cos(latMid) so the map has its true proportions (an equirectangular
+ * projection centred on the data). Column extents only — a facet filter must
+ * not move the map — and the spread grows as n^0.25 so bigger collections
+ * stay lights rather than a blob.
+ */
+export function mapScale(
+  xc: { min: number; max: number },
+  yc: { min: number; max: number },
+  n: number,
+  aspect: number,
+): { w: number; h: number; sx: number; sy: number } {
+  const xSpan = xc.max - xc.min || 1;
+  const ySpan = yc.max - yc.min || 1;
+  const latMid = (yc.min + yc.max) / 2;
+  const kx = Math.max(1e-3, Math.cos((latMid * Math.PI) / 180));
+  const ratio = (xSpan * kx) / ySpan;
+  const S = MAP_SPAN * Math.sqrt(aspect) * Math.pow(Math.max(1, n) / 900, 0.25);
+  const [w, h] = ratio >= aspect ? [S, S / ratio] : [(S * ratio) / aspect, S / aspect];
+  return { w, h, sx: w / xSpan, sy: h / ySpan };
 }
 
 function empty(n: number): { positions: Float32Array } {
@@ -128,6 +180,8 @@ export function gridLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: '
   return {
     positions,
     visible: count,
+    pitch: CARD_PITCH,
+    cardSize: CARD_SIZE,
     bounds: { minX: x0, maxX: x0 + cols * CARD_PITCH, minY: y0 - rows * CARD_PITCH, maxY: y0 },
   };
 }
@@ -179,6 +233,8 @@ export function barsLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: '
   return {
     positions,
     visible: order.length,
+    pitch: CARD_PITCH,
+    cardSize: CARD_SIZE,
     bounds: { minX: x0, maxX: x0 + totalW, minY: y0, maxY: y0 + maxRows * CARD_PITCH },
     xAxis: { title: spec.by, ticks },
   };
@@ -238,6 +294,8 @@ export function scatterLayout(data: LayoutData, spec: Extract<LayoutSpec, { type
   return {
     positions,
     visible: order.length,
+    pitch: CARD_PITCH,
+    cardSize: CARD_SIZE,
     bounds: { minX: x0, maxX: x0 + totalW, minY: y0, maxY: y0 + totalH },
     xAxis: { title: spec.x, ticks: xTicks },
     yAxis: { title: spec.y, ticks: yTicks },
@@ -249,6 +307,13 @@ export function scatterLayout(data: LayoutData, spec: Extract<LayoutSpec, { type
  * the data's own aspect ratio preserved. For a pixel collection (X, Y of an
  * image) this reproduces the picture exactly — cards land on the integer grid.
  */
+/** A dense integer lattice: integer extents whose cell count matches the row count within 2 %. */
+export function isRasterGrid(xc: { min: number; max: number }, yc: { min: number; max: number }, n: number): boolean {
+  if (!Number.isInteger(xc.min) || !Number.isInteger(xc.max) || !Number.isInteger(yc.min) || !Number.isInteger(yc.max)) return false;
+  const cells = (xc.max - xc.min + 1) * (yc.max - yc.min + 1);
+  return Math.abs(n - cells) / Math.max(1, n) < 0.02;
+}
+
 export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy' }>, mask?: Uint8Array | null, aspect = 1.6): LayoutResult {
   const { positions } = empty(data.n);
   const xc = data.columns[spec.x];
@@ -264,17 +329,19 @@ export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy
   // a unit and the picture's own proportions must be preserved exactly. Scale 1,
   // nothing else: 1.002 would leave a 0.2% gap at every seam, which beats against
   // the sample grid as a dark line every ~140 cards.
-  const cells = (xSpan + 1) * (ySpan + 1);
-  const isRaster =
-    Number.isInteger(xc.min) && Number.isInteger(xc.max) &&
-    Number.isInteger(yc.min) && Number.isInteger(yc.max) &&
-    Math.abs(order.length - cells) / Math.max(1, order.length) < 0.02;
+  // Decided from the columns, never from the visible count: a facet mask must
+  // not turn a picture into a stretched viewport-fill scatter.
+  const isRaster = isRasterGrid(xc, yc, data.n);
 
   let w: number;
   let h: number;
   let sx: number;
   let sy: number;
-  if (isRaster) {
+  if (spec.equal) {
+    // Geographic coordinates: both axes are degrees, so keep the true map
+    // shape rather than filling the viewport.
+    ({ w, h, sx, sy } = mapScale(xc, yc, data.n, aspect));
+  } else if (isRaster) {
     w = xSpan;
     h = ySpan;
     sx = 1;
@@ -299,8 +366,9 @@ export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy
     if (!Number.isFinite(xv) || !Number.isFinite(yv)) { positions[i + 2] = 0; positions[i + 3] = 0; continue; }
     positions[i] = x0 + (xv - xc.min) * sx;
     positions[i + 1] = y0 + (yv - yc.min) * sy;
-    // Full pitch, not CARD_SIZE: a photograph must tile without gaps.
-    positions[i + 2] = CARD_PITCH;
+    // Full pitch, not CARD_SIZE: a photograph must tile without gaps. On the
+    // map a card is a point of light instead.
+    positions[i + 2] = spec.equal ? MAP_DOT : CARD_PITCH;
     positions[i + 3] = 1;
   }
 
@@ -316,6 +384,8 @@ export function xyLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: 'xy
   return {
     positions,
     visible: order.length,
+    pitch: spec.equal ? MAP_DOT : CARD_PITCH,
+    cardSize: spec.equal ? MAP_DOT : CARD_PITCH,
     bounds: { minX: x0, maxX: x0 + w, minY: y0, maxY: y0 + h },
     xAxis: { title: spec.x, ticks: ticks(xc, x0, sx, xSpan) },
     yAxis: { title: spec.y, ticks: ticks(yc, y0, sy, ySpan) },

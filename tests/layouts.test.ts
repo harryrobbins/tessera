@@ -5,8 +5,13 @@ import {
   gridLayout,
   barsLayout,
   scatterLayout,
+  xyLayout,
+  isRasterGrid,
+  mapScale,
   CARD_SIZE,
   CARD_PITCH,
+  MAP_SPAN,
+  MAP_DOT,
   type LayoutData,
   type LayoutColumnNumber,
   type LayoutColumnCategory,
@@ -507,5 +512,211 @@ describe('determinism', () => {
     const s1 = scatterLayout(data, { type: 'scatter', x: 'cat', y: 'cat' }, null);
     const s2 = scatterLayout(data, { type: 'scatter', x: 'cat', y: 'cat' }, null);
     expect(s1.positions).toEqual(s2.positions);
+  });
+});
+
+describe('xyLayout equal aspect (map)', () => {
+  const N = 900;
+  const ASPECT = 1.6;
+  function geoData(n: number): LayoutData {
+    const rand = mulberry32(7);
+    const lon: number[] = [];
+    const lat: number[] = [];
+    for (let i = 0; i < n; i++) {
+      lon.push(-6 + 8 * rand());
+      lat.push(50 + 9 * rand());
+    }
+    // Pin the extents so the expected numbers are exact.
+    lon[0] = -6; lon[1] = 2; lat[0] = 50; lat[1] = 59;
+    return { n, columns: { Longitude: numCol('Longitude', lon), Latitude: numCol('Latitude', lat) } };
+  }
+  const spec = { type: 'xy' as const, x: 'Longitude', y: 'Latitude', equal: true };
+  const cosMid = Math.cos((54.5 * Math.PI) / 180);
+
+  it('shrinks longitude by cos(latMid) so sx/sy is exact', () => {
+    const r = xyLayout(geoData(N), spec, null, ASPECT);
+    const { sx, sy } = mapScale({ min: -6, max: 2 }, { min: 50, max: 59 }, N, ASPECT);
+    expect(Math.abs(sx / sy - cosMid)).toBeLessThan(1e-6);
+    const w = r.bounds.maxX - r.bounds.minX;
+    const h = r.bounds.maxY - r.bounds.minY;
+    expect(Math.abs(w / h - (8 * cosMid) / 9)).toBeLessThan(1e-6);
+  });
+
+  it('fits inside [S, S/aspect] with S = MAP_SPAN * sqrt(aspect) * (n/900)^0.25', () => {
+    for (const n of [900, 5000]) {
+      const r = xyLayout(geoData(n), spec, null, ASPECT);
+      const S = MAP_SPAN * Math.sqrt(ASPECT) * Math.pow(n / 900, 0.25);
+      const w = r.bounds.maxX - r.bounds.minX;
+      const h = r.bounds.maxY - r.bounds.minY;
+      expect(w).toBeLessThanOrEqual(S + 1e-9);
+      expect(h).toBeLessThanOrEqual(S / ASPECT + 1e-9);
+      // The UK is taller than wide, so the height is the binding side.
+      expect(Math.abs(h - S / ASPECT)).toBeLessThan(1e-9);
+    }
+  });
+
+  it('places every card at MAP_DOT size, and positions land inside the bounds', () => {
+    const r = xyLayout(geoData(N), spec, null, ASPECT);
+    for (let i = 0; i < N; i++) {
+      expect(r.positions[i * 4 + 2]).toBe(Math.fround(MAP_DOT));
+      expect(r.positions[i * 4 + 3]).toBe(1);
+      expect(r.positions[i * 4]).toBeGreaterThanOrEqual(r.bounds.minX - 1e-3);
+      expect(r.positions[i * 4]).toBeLessThanOrEqual(r.bounds.maxX + 1e-3);
+      expect(r.positions[i * 4 + 1]).toBeGreaterThanOrEqual(r.bounds.minY - 1e-3);
+      expect(r.positions[i * 4 + 1]).toBeLessThanOrEqual(r.bounds.maxY + 1e-3);
+    }
+  });
+
+  it('does not move when filtered: a half mask keeps scale, bounds and every visible position', () => {
+    const data = geoData(N);
+    const full = xyLayout(data, spec, null, ASPECT);
+    const mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) mask[i] = i % 2;
+    const half = xyLayout(data, spec, mask, ASPECT);
+    expect(half.bounds).toEqual(full.bounds);
+    expect(half.visible).toBe(N / 2);
+    for (let i = 0; i < N; i++) {
+      if (mask[i]) {
+        expect(half.positions[i * 4]).toBe(full.positions[i * 4]);
+        expect(half.positions[i * 4 + 1]).toBe(full.positions[i * 4 + 1]);
+      } else {
+        expect(half.positions[i * 4 + 2]).toBe(0);
+        expect(half.positions[i * 4 + 3]).toBe(0);
+      }
+    }
+    expect(half.xAxis!.ticks).toEqual(full.xAxis!.ticks);
+    expect(half.yAxis!.ticks).toEqual(full.yAxis!.ticks);
+  });
+
+  it('equal: false reproduces the viewport-filling scatter', () => {
+    const data = geoData(N);
+    const fill = xyLayout(data, { type: 'xy', x: 'Longitude', y: 'Latitude', equal: false }, null, ASPECT);
+    const legacy = xyLayout(data, { type: 'xy', x: 'Longitude', y: 'Latitude' }, null, ASPECT);
+    expect(fill.positions).toEqual(legacy.positions);
+    expect(fill.bounds).toEqual(legacy.bounds);
+    const w = Math.sqrt(N * ASPECT);
+    expect(fill.bounds.maxX - fill.bounds.minX).toBeCloseTo(w, 9);
+    expect(fill.bounds.maxY - fill.bounds.minY).toBeCloseTo(w / ASPECT, 9);
+    expect(fill.positions[2]).toBe(CARD_PITCH);
+  });
+
+  it('gives NaN rows size and alpha 0', () => {
+    const data = geoData(N);
+    (data.columns.Longitude as LayoutColumnNumber).values[5] = NaN;
+    (data.columns.Latitude as LayoutColumnNumber).values[6] = NaN;
+    const r = xyLayout(data, spec, null, ASPECT);
+    for (const i of [5, 6]) {
+      expect(r.positions[i * 4 + 2]).toBe(0);
+      expect(r.positions[i * 4 + 3]).toBe(0);
+    }
+    expect(r.positions[7 * 4 + 2]).toBe(Math.fround(MAP_DOT));
+  });
+
+  it('mapScale picks the width-bound branch for a wide extent', () => {
+    // 20 degrees of longitude at the equator against 2 of latitude: ratio 10 > aspect.
+    const { w, h, sx, sy } = mapScale({ min: 0, max: 20 }, { min: -1, max: 1 }, 900, ASPECT);
+    const S = MAP_SPAN * Math.sqrt(ASPECT);
+    expect(w).toBeCloseTo(S, 9);
+    expect(h).toBeCloseTo(S / 10, 9);
+    expect(sx / sy).toBeCloseTo(1, 9);
+  });
+});
+
+describe('bucketize integer edges (D-36)', () => {
+  it('gives an integer column with distinct <= bins one bin per integer', () => {
+    // Years 2000..2015: 16 values into 12 bins used to cut some bars in half.
+    const years: number[] = [];
+    for (let i = 0; i < 64; i++) years.push(2000 + (i % 16));
+    const data: LayoutData = { n: 64, columns: { Year: numCol('Year', years) } };
+    const { codes, labels } = bucketize(data, 'Year', 16);
+    expect(labels).toHaveLength(16);
+    expect(labels[0]).toBe('2000');
+    expect(labels[15]).toBe('2015');
+    for (let i = 0; i < 64; i++) expect(codes[i]).toBe(i % 16);
+  });
+
+  it('falls back to equal-width bins when there are more integers than bins', () => {
+    const data: LayoutData = { n: 3, columns: { v: numCol('v', [0, 50, 100]) } };
+    const { codes, labels } = bucketize(data, 'v', 4);
+    expect(labels).toHaveLength(4);
+    expect(Array.from(codes)).toEqual([0, 2, 3]);
+  });
+
+  it('does not treat a fractional column with integer extents as integer', () => {
+    const data: LayoutData = { n: 3, columns: { v: numCol('v', [0, 0.5, 2]) } };
+    const { labels } = bucketize(data, 'v', 4);
+    expect(labels).toHaveLength(4);
+  });
+});
+
+describe('xyLayout raster (D-01)', () => {
+  const W = 10;
+  const H = 8;
+  function raster(): LayoutData {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { xs.push(x); ys.push(y); }
+    return { n: W * H, columns: { X: numCol('X', xs), Y: numCol('Y', ys) } };
+  }
+  const spec = { type: 'xy' as const, x: 'X', y: 'Y' };
+
+  it('detects a dense integer lattice from the columns', () => {
+    expect(isRasterGrid({ min: 0, max: W - 1 }, { min: 0, max: H - 1 }, W * H)).toBe(true);
+    expect(isRasterGrid({ min: 0, max: W - 1 }, { min: 0, max: H - 1 }, W * H / 2)).toBe(false);
+    expect(isRasterGrid({ min: 0.5, max: W - 1 }, { min: 0, max: H - 1 }, W * H)).toBe(false);
+  });
+
+  it('keeps scale 1 and pitch 1 under a mask, so the picture is not stretched', () => {
+    const data = raster();
+    const full = xyLayout(data, spec, null, 1.6);
+    const mask = new Uint8Array(data.n);
+    for (let i = 0; i < data.n; i += 2) mask[i] = 1;
+    const half = xyLayout(data, spec, mask, 1.6);
+    expect(full.pitch).toBe(CARD_PITCH);
+    expect(half.pitch).toBe(CARD_PITCH);
+    expect(half.bounds).toEqual(full.bounds);
+    expect(half.visible).toBe(data.n / 2);
+    // Neighbouring visible cells are exactly one pitch apart on each axis.
+    const x = (i: number) => half.positions[i * 4];
+    const y = (i: number) => half.positions[i * 4 + 1];
+    expect(x(2) - x(0)).toBeCloseTo(2 * CARD_PITCH, 6);
+    expect(y(2 * W) - y(0)).toBeCloseTo(2 * CARD_PITCH, 6);
+    for (let i = 0; i < data.n; i++) {
+      expect(half.positions[i * 4 + 2]).toBe(mask[i] ? CARD_PITCH : 0);
+      expect(half.positions[i * 4 + 3]).toBe(mask[i] ? 1 : 0);
+      if (mask[i]) {
+        expect(half.positions[i * 4]).toBe(full.positions[i * 4]);
+        expect(half.positions[i * 4 + 1]).toBe(full.positions[i * 4 + 1]);
+      }
+    }
+  });
+
+  it('scales a non-raster scatter to fill the viewport with independent axis scales', () => {
+    const data: LayoutData = {
+      n: 4,
+      columns: { X: numCol('X', [0, 1.5, 3, 100]), Y: numCol('Y', [0, 0.25, 0.5, 1]) },
+    };
+    const r = xyLayout(data, spec, null, 2);
+    const w = r.bounds.maxX - r.bounds.minX;
+    const h = r.bounds.maxY - r.bounds.minY;
+    expect(w / h).toBeCloseTo(2, 6);
+    expect(r.xAxis?.ticks).toHaveLength(5);
+    expect(r.xAxis?.ticks[0].pos).toBeCloseTo(r.bounds.minX, 6);
+    expect(r.xAxis?.ticks[4].pos).toBeCloseTo(r.bounds.maxX, 6);
+    expect(r.yAxis?.ticks[4].pos).toBeCloseTo(r.bounds.maxY, 6);
+  });
+
+  it('hides NaN rows and keeps bounds when everything is masked out', () => {
+    const data: LayoutData = {
+      n: 3,
+      columns: { X: numCol('X', [0, NaN, 2]), Y: numCol('Y', [0, 1, 2]) },
+    };
+    const r = xyLayout(data, spec, null, 1);
+    expect(r.positions[4 + 2]).toBe(0);
+    expect(r.positions[4 + 3]).toBe(0);
+    const none = xyLayout(data, spec, new Uint8Array(3), 1);
+    expect(none.visible).toBe(0);
+    expect(Number.isFinite(none.bounds.minX) && Number.isFinite(none.bounds.maxX)).toBe(true);
+    expect(none.bounds.maxX).toBeGreaterThan(none.bounds.minX);
   });
 });
