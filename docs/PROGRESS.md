@@ -8,7 +8,7 @@ Workstreams started 2026-08-26 (lead session, subagents coordinated via `.agent-
 | B | Synthetic tax / financial / customer-service datasets | docs/plans/B-datasets.md | landed: tax-cases(+geo), tax-returns, payments; Titanic removed; faker names |
 | C | First-visit onboarding walkthrough with ElevenLabs voiceover | docs/plans/C-onboarding.md | done (16-step story, anchored caption, e2e green); audio blocked on key permission (see log) |
 | E | Customer-journey flagship: UK map (lat/lon), rich customer card, detailed record view, revised tour, female Scottish voice | docs/plans/E-customer-journey.md | done: E1 map/lights, E2 card, E3 detail all landed |
-| G | Performance pass (Fable), after everything else | — | in progress |
+| G | Performance pass | docs/plans/G-performance.md | done: hitch, solve memo, atlas bytes, shader branches |
 | F | Category colours: pinned per-category colours (`Dataset.colors`) + auto-detected colour-name labels | (user request, no plan doc) | landed: src/core/palette.ts, columnar.ts, pixels.ts, app.ts/main.ts/facets.ts swatches, tests/palette.test.ts |
 | D | Full code review + remediation | docs/plans/D-code-review.md | all 8 groups landed |
 | I | Cards: one record per card, a quieter face, an expanded modal | docs/plans/I-cards.md | WP1–WP6 landed |
@@ -71,3 +71,29 @@ Workstreams started 2026-08-26 (lead session, subagents coordinated via `.agent-
 - 2026-08-27 10:58 (lead): the atomic commit made `verify-hidpi` flaky — it sampled `frame.hiRes` between the flight and the commit, then read pixels after it. Both scripts now wait for the plan to commit before sampling. **WP6**: README, `scripts/README.md`, this log and `docs/HANDOFF.md` brought up to date.
 - 2026-08-27 11:20 (lead): user feedback — "the data for the larger datasets need to be regenerated: tax customer service 100,000 is not the same shape as 3,000". It was not: **all five** generators dropped their identity column above 50,000 rows (`tax-cases` also dropped `Customer` and `Postcode` and re-pointed `labelColumn` to `Topic`; `tax-returns` to `Sector`, `payments` to `Merchant category`, `invoices` to `Supplier`, `products` to `Type`), and `tax-cases` switched card design above 3,000. Fixed: `TextColumn` gains an `at(i)` accessor and `values` may be null; `derivedText` (src/data/columnar.ts) makes the five formulaic identity columns computed rather than stored, so a million rows cost nothing; `tax-cases` materialises `Customer` and `Postcode` at every size (faker is now loaded for every tax-cases size — +200 ms at 100k, measured) and declares `card.custom` unconditionally, which WP3 makes correct since every card is per-row art at any size. `toLayoutData` skips text columns (a derived one carries a closure structured clone would reject). Tests that encoded the old gates were rewritten to assert the new invariant. 391 tests.
 - 2026-08-27 11:26 (lead): the tour e2e caught a real spotlight bug while re-verifying: `.tour-spot` transitions over 0.35 s, and while it *tracks a card on the canvas* that ease restarts every frame, so the ring trails the card and the caption — placed from the true rect — overlaps it. `.tour-spot.tracking` now has `transition: none`. The e2e's adjacency failure now prints both rects.
+- 2026-08-27 (G): performance pass landed against the first GPU baseline
+  (`bench-results/manual-json-2026-08-27T11-46-49.json`, Intel Arc). fps there
+  is vsync (120 everywhere, p50 8.30 ms) and cannot move; the work was in
+  `worst`, `layoutSolveMs` and bytes. **The 91.7 / 50.1 / 50.0 ms hitches were
+  the hi-res pass re-rasterising art the base atlas already held**: at the
+  fitted view `tax-cases:900` draws 67 device px cards against a 128 px base
+  slot, and `products:1000` 64.2 px against 64. `hiResWorthwhile` /
+  `tierBeatsBase` (src/gl/hires.ts) keep the pass off there, `HIRES_MS_BUDGET`
+  (5 ms) replaces the 4 Mpx budget that could not bound a text-bound cost,
+  `PivotApp.hiPlan` caches the O(n) viewport scan for the life of a plan, and
+  `finishHi` runs on the ticks that flip instances rather than on every raster.
+  Same-build A/B on the fill (perf-probe's new `FILL_FN`, llvmpipe, 3608×1987):
+  worst 1000 → 133 ms on both, from 12x p50 to 2x. Worker: a per-collection
+  `WeakMap` memo of sorted order and bin sets, with the mask applied to the
+  cached order (same answer — filtering a sorted sequence keeps it sorted and
+  stable) — steady-state solve at products:500000 grid 27 → 6.5 ms, scatter
+  33.9 → 14.2, tax-cases:100000 scatter 10.6 → 2.1. `xyLayout` walks rows
+  directly instead of building an identity index. Atlas canvas cropped to its
+  grid (`atlasGrid`) + a 512 px cover slot: 64 → 6.2 MB per load above the
+  per-item cap. `u_hasHi` and `u_glow` uniform branches drop a texture fetch and
+  the whole night-lights path off the map — **proved neutral**, `verify-map
+  --blend-compare` gives 0 differing channels of 5,205,792. `setTargets` swaps
+  the from/to bindings on a landed transition: 32 → 16 MB per layout change at
+  1M. `?preserve=0` added so the user can measure preserveDrawingBuffer on real
+  hardware. 414 tests, typecheck clean, tour-e2e / detail-e2e / verify-cards /
+  verify-card / verify-hidpi / verify-map all green.

@@ -1,6 +1,6 @@
 # Scripts
 
-Every script here boots its own vite on its own port, drives the bundled
+Every script here except `tour-shots.mjs` boots its own vite on its own port, drives the bundled
 Linux Chromium through Playwright (see the `playwright-wsl` skill on WSL2),
 and kills the server on exit. `--keep-server` attaches to one already running;
 `--swiftshader` forces a CPU-only, reproducible run.
@@ -8,12 +8,14 @@ and kills the server on exit. `--keep-server` attaches to one already running;
 | Script | Port | Checks |
 |---|---|---|
 | `bench-headless.mjs` (`pnpm bench`) | 5181 | FPS per dataset size and phase, written to `bench-results/` (below) |
-| `tour-e2e.mjs` (`pnpm test:e2e`) | 5182 | every guided-tour step: caption, spotlight, app state; audio stubbed |
+| `tour-e2e.mjs` (`pnpm test:e2e`) | 5182 | every guided-tour step: caption, spotlight, app state; audio stubbed; and that the tour stops a running benchmark and reloads its own collection |
+| `tour-shots.mjs` | — (uses `pnpm dev`) | not a check: one screenshot per tour step, with the app state behind it. `--bench-first` opens the tour over a running benchmark |
 | `detail-e2e.mjs` | 5195 | record modal is a dialog that makes the app inert and expands out of its card; demo action links never navigate |
 | `verify-hidpi.mjs` | 5191 | hi-res atlas tier engages at DPR 2 and 1; edges sharper than `?hires=0` |
 | `verify-card.mjs` | 5196 | flagship customer card zoomed and in a grid; two same-topic neighbours at 20,000 rows differ pixel for pixel |
 | `verify-cards.mjs` | 5197 | Cards popover (design, labels, tags, title), `?cards=`, and the canvas as a control: keyboard walk, live region, cursor chip |
 | `verify-map.mjs` | 5194 | geo collection opens on the equal-aspect map; lights brighter than `?glow=0`; zooming out resolves into points; premultiplied blend pixel-identical for cards |
+| `perf-probe.mjs` | 5312 (preview) | not a check: the numbers `pnpm bench` does not cover — load time with a breakdown, solve time per layout, frame time on the map with and without the glow, the settle hitch at the fitted view, and bytes handed to GPU textures and buffers. Serves `dist/`, so run `pnpm build` first. Writes `bench-results/probe-<label>.json` |
 | `_verify-subpath.mjs` | 4173 (preview) | built demo boots under a `/tessera/` mount; run by the deploy workflow |
 | `generate-voiceover.mjs` (`pnpm voiceover`) | — | ElevenLabs narration clips for the tour (`--dry-run`, `--force`, `--only <id>`, `--list-voices`, `--add-voice`) |
 

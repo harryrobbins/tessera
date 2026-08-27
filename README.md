@@ -63,8 +63,11 @@ Three ideas carry the performance:
 64 px slot (~3,100 rows on a 4096² texture), with the slot sized to the
 collection (`slotFor`: 900 cards get 128 px; a hundred get 256). Above that the
 atlas holds one **cover** per category — the category's accent, its initials and
-its name, a label that cannot be mistaken for a record at any size — and cards
-are tinted per row. Texture memory stays flat at any collection size.
+its name, a label that cannot be mistaken for a record at any size, capped at a
+512 px slot — and cards are tinted per row. The canvas is cropped to the grid it
+actually fills (`atlasGrid`), because that canvas *is* the upload and it is paid
+again on every colour change: a handful of covers is 6 MB, not the 64 MB of a
+full 4096² square. Texture memory stays flat at any collection size.
 
 **Hi-res atlas** (`src/gl/hires.ts`, `src/app.ts`) is where uniqueness comes
 from above that cap. Once the camera has settled and cards are at least 48
@@ -78,11 +81,18 @@ one draw call. Two rules make it uniform rather than merely sharp:
   which a 4096² texture holds nine — so nine cards were crisp and the rest were
   the 64 px base slot stretched over hundreds of pixels. At most a 1.5× upscale
   in a narrow band above each power of two buys a uniformly sharp board.
-- **The commit is atomic.** Rasterising runs to a pixel budget
-  (`HIRES_PIXEL_BUDGET`, 4 Mpx per tick — a card budget cannot bound the work,
-  since 24 cards is 25 Mpx at tier 1024 and 98 kpx at tier 64) and the
-  instances flip only once every card on screen has its own art, so a record is
-  never drawn beside a group cover.
+- **The commit is atomic.** Rasterising runs to a wall-clock budget
+  (`HIRES_MS_BUDGET`, 5 ms per tick) and the instances flip only once every card
+  on screen has its own art, so a record is never drawn beside a group cover.
+  The budget is time, not pixels, because a card's cost is shaping and drawing
+  its text: 4 Mpx was four cards at tier 1024 and 256 at tier 128, and a 90 ms
+  frame either way.
+- **It does not repaint what the base atlas already holds.** Below the per-item
+  cap the base atlas *is* that row's card, so the pass stays off until the card
+  outgrows its own slot (`hiResWorthwhile`) and the tier the viewport settles on
+  beats it (`tierBeatsBase`). Fitting 900 cards to a 4K canvas draws them at
+  67 device px against a 128 px slot — that was a 92 ms frame spent arriving at
+  the texels it started with.
 
 **Map and night lights** (`src/layout/layouts.ts`, `src/gl/shaders.ts`). A
 dataset that declares `geo: { lon, lat }` opens on `{ type: 'xy', equal: true }`:
@@ -350,9 +360,27 @@ representative figures.
 The floor, for reference (`bench-results/after-wp3-*.json`, Core Ultra 7 155H,
 llvmpipe, 1048×668 canvas): 60 fps at 900 and 1,000 cards, 42–51 fps at 10,000,
 11–18 fps at 100,000, 2–4 fps at 500,000, and 1,000,000 does not complete a
-phase. A GPU run has not been captured on this machine, so **no GPU baseline
-exists yet** — the earlier `bench-results/before-*.json` is a SwiftShader run
-that reports p95 = 0 above 10,000 rows and cannot be compared against.
+phase.
+
+The GPU baseline is `bench-results/manual-json-2026-08-27T11-46-49.json`
+(Windows Chrome, Intel Arc via ANGLE D3D11, DPR 1, 3608×1987 canvas). Read it
+for what it is: **120 fps and a flat 8.30 ms p50 at every size to 500,000 cards
+is vsync, not headroom.** The numbers that carry information are `gpuP50` /
+`gpuP95` (0.68–4.13 / 1.25–6.00 ms), `layoutSolveMs`, and `worst` — which is
+where the pass in `docs/plans/G-performance.md` found its work.
+
+`scripts/perf-probe.mjs` covers what the bench does not: load time with a
+breakdown, solve time per layout, frame time on the map with and without the
+glow, the settle hitch at the fitted view, and the bytes handed to GPU textures
+and buffers.
+
+**`?preserve=0`** drops `preserveDrawingBuffer`, which is what lets the app skip
+idle frames without flicker and which costs the driver a full-screen copy of
+every presented frame — seven megapixels on a 4K canvas. It cannot be measured
+on a software rasteriser, and neither can the flicker it prevents, so it is
+still the default. Load the app with and without the flag and press
+**Benchmark** each time: `docs/plans/G-performance.md` §5 says what to do with
+the answer.
 
 ## Verification scripts
 

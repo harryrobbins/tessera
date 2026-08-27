@@ -3,7 +3,7 @@
 Read this first if you are resuming, then `docs/PROGRESS.md` (rows + dated log)
 and `~/.claude/skills/agent-bus/bus.sh read 60`. Workstreams A–F, D, H and I are
 **committed on `main`** as of 2026-08-27 (one commit per subsystem; `git log`
-reads as the build order). Only G is outstanding.
+reads as the build order). G is implemented in the working tree, uncommitted.
 
 ## State
 
@@ -17,27 +17,28 @@ reads as the build order). Only G is outstanding.
 | F | (user request) | done — `Dataset.colors`, `colorOfRow` |
 | H | plans/H-review-round1.md | done — review round 1, fix groups 1–3 |
 | I | plans/I-cards.md | **done — WP1–WP6**, including the §9 addendum |
-| G | — | **not done**: the performance pass never landed (its agent died mid-run) |
+| G | plans/G-performance.md | done — hitch, solve memo, atlas bytes, shader branches; §5 lists what only the user's GPU can answer |
 
 ## What is left
 
-1. **G, the performance pass.** `bench-results/after-wp3-*.json` is a full run
-   but it is **software** (llvmpipe on headless WSL2), not a GPU: 60 fps to
-   1,000 cards, 42–51 at 10,000, 11–18 at 100,000, 2–4 at 500,000, and
-   1,000,000 does not complete a phase. There is **no GPU baseline** — the older
-   `before-*.json` is SwiftShader and reports p95 = 0 above 10,000 rows. To do
-   this properly: `pnpm dev`, press **Benchmark** in a real browser window, save
-   that as the baseline, then optimise. `scripts/perf-probe.mjs` measures load, solve,
-   frame time per mode, the hi-res hitch and bytes uploaded — it was written
-   for that pass and has never been run against the current tree.
-2. Noted but deliberately not built (plan I): a uniform grid index over
-   `renderer.to` would make `renderer.pick` O(1) and lift the 200,000-row hover
-   gate; Deep Zoom tiles beyond 1024 px; `OffscreenCanvas` rasterisation.
+1. **Re-measure G on real hardware.** `docs/plans/G-performance.md` §5 lists it:
+   press **Benchmark** in the browser that produced
+   `bench-results/manual-json-2026-08-27T11-46-49.json` and compare `worst` on
+   `tax-cases:900` and `products:1000` (91.7 and 50.1 ms before) and `gpuP50`
+   everywhere. Then load once with `?preserve=0` and press it again — if that
+   moves `gpuP50`, `preserveDrawingBuffer` should stop being the default; if it
+   does not, delete the flag. Nothing about a real GPU can be measured on this
+   box: headless Chromium here is llvmpipe, so every local figure in that plan
+   is a ratio against itself and says so.
+2. Noted but deliberately not built (plan I §, plan G §4): a uniform grid index
+   over `renderer.to` would make `renderer.pick` O(1) and lift the 200,000-row
+   hover gate; Deep Zoom tiles beyond 1024 px; `OffscreenCanvas` rasterisation;
+   packing the style buffer below 16 bytes.
 
 ## How to verify the tree
 
 ```
-pnpm typecheck && pnpm test          # 391 tests
+pnpm typecheck && pnpm test          # 414 tests
 pnpm test:e2e                        # tour, port 5182
 node scripts/detail-e2e.mjs          # record modal, 27 checks (5195)
 node scripts/verify-cards.mjs        # Cards popover + canvas keyboard, 15 checks (5197)
@@ -45,6 +46,7 @@ node scripts/verify-card.mjs         # uniqueness + the flagship card (5196)
 node scripts/verify-hidpi.mjs        # hi-res tier + sharpness (5191)
 node scripts/verify-map.mjs          # map, glow, far zoom, blend (5194)
 pnpm bench                           # bench-results/latest.json (5181)
+node scripts/perf-probe.mjs          # load/solve/frame/fill/bytes (5312, needs pnpm build)
 ```
 
 Use Linux node and the bundled Chromium (`playwright-wsl` skill); each script
@@ -72,6 +74,11 @@ suspect the wait, not the renderer.
 - **Uniqueness lives in the hi-res atlas** (`src/gl/hires.ts` `planTier`,
   `src/app.ts` `updateHiRes`), not in the base atlas. The base atlas holds one
   card per row up to ~3,136 rows and one *cover* per category above that.
+- **The hi-res pass is now deliberately off below the per-item cap** until a
+  card outgrows its own base slot (`hiResWorthwhile`, `tierBeatsBase`). A script
+  that expects `lastFrame.hiRes` must zoom past the slot, not merely past
+  `UNIQUE_MIN_PX` — `verify-card` phase 2 reports "hi-res off" at 128 px on a
+  128 px slot and that is correct, not a regression.
 - **The modal is modal.** `#app` is `inert` while it is open, so anything that
   drives the app while the dialog is up must either close it first or call the
   app directly (the tour does both — see `src/tour/actions.ts`).
