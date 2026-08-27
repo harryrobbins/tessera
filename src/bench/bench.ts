@@ -86,7 +86,8 @@ function phase(
 
 export interface BenchOptions {
   sizes?: number[];
-  includeTitanic?: boolean;
+  /** Include the small (900-card, per-row atlas) tax-cases target. */
+  includeSmall?: boolean;
   /** Per-phase duration. Shorter runs are noisier; 2s is the floor worth trusting. */
   phaseMs?: number;
   onProgress?: (msg: string) => void;
@@ -104,7 +105,7 @@ export async function runBench(app: PivotApp, opts: BenchOptions = {}): Promise<
   app.alwaysRender = true;
 
   const targets: Array<{ key: string; n: number }> = [];
-  if (opts.includeTitanic !== false) targets.push({ key: 'titanic', n: 891 });
+  if (opts.includeSmall !== false) targets.push({ key: 'tax-cases:900', n: 900 });
   for (const n of sizes) targets.push({ key: `products:${n}`, n });
 
   try {
@@ -171,8 +172,9 @@ function morphDriver(app: PivotApp, solve: Record<string, number>) {
     const want = Math.min(steps.length, Math.floor(progress * (steps.length + 0.4)));
     while (fired < want) {
       const i = fired++;
-      void steps[i]().then(() => {
-        solve[app.lastLayoutName] = app.lastSolveMs;
+      void steps[i]().then((sol) => {
+        // A superseded solve resolves null: credit only the one that landed.
+        if (sol) solve[app.lastLayoutName] = sol.solveMs;
       });
     }
   };
