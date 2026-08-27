@@ -4,5 +4,6 @@ bench-results/*.json
 screenshots/
 *.tmp.mjs
 .env
+.env.*
 .idea/
 .claude/settings.local.json
