@@ -3,6 +3,8 @@
  * dictionary-encoded Int32 codes — both go straight to the layout worker as
  * transferables, and neither allocates per row at query time.
  */
+import type { CardTemplate, DetailTemplate } from './card';
+
 export interface NumericColumn {
   kind: 'number';
   name: string;
@@ -23,7 +25,17 @@ export interface CategoryColumn {
 export interface TextColumn {
   kind: 'text';
   name: string;
-  values: string[];
+  /**
+   * The materialised strings, or **null** for a derived column.
+   *
+   * Identity columns (`CS-25-000123`, `TX-000001`) are pure functions of the
+   * row index or of columns that are already in memory, and materialising a
+   * million of them costs ~80 MB for nothing. Read through `at`, which every
+   * text column has; reach for `values` only when you genuinely need the array.
+   */
+  values: string[] | null;
+  /** Row `i`'s text. '' past the end, like an out-of-range array read. */
+  at: (i: number) => string;
 }
 
 export type Column = NumericColumn | CategoryColumn | TextColumn;
@@ -42,6 +54,19 @@ export interface Dataset {
   rgb?: Uint8Array;
   /** false = draw flat colour quads with no card art (pixels, dense scatter). */
   cards?: boolean;
+  /** Family tag (e.g. 'tax-cases') for views that know a particular dataset. */
+  kind?: string;
+  /** Names of the numeric columns holding geographic coordinates, if any. */
+  geo?: { lon: string; lat: string };
+  /** Pinned colours per category, by field then label (`#rrggbb`). A field
+   *  listed here bypasses the categorical palette and its 8-slot cap; labels
+   *  that are colour names ("Red", "Dark blue") are auto-coloured anyway. */
+  colors?: Record<string, Record<string, string>>;
+  /** Declarative content for the small card. Absent = derived from the label
+   *  column, the colour-by field and the leading facets. */
+  card?: CardTemplate;
+  /** Declarative content for the expanded modal. Absent = every column. */
+  detail?: DetailTemplate;
 }
 
 export function numeric(name: string, values: ArrayLike<number>, format?: (v: number) => string): NumericColumn {
@@ -82,7 +107,17 @@ export function categoryFromCodes(name: string, codes: Int32Array, categories: s
 }
 
 export function text(name: string, values: string[]): TextColumn {
-  return { kind: 'text', name, values };
+  return { kind: 'text', name, values, at: (i) => values[i] ?? '' };
+}
+
+/**
+ * A text column computed on demand rather than stored — for values that are a
+ * formula over the row index or over columns that already exist. The shape of
+ * a collection should not depend on how many rows it has, and this is what
+ * makes that affordable at a million.
+ */
+export function derivedText(name: string, at: (i: number) => string): TextColumn {
+  return { kind: 'text', name, values: null, at };
 }
 
 export function getNumeric(ds: Dataset, name: string): NumericColumn {
@@ -102,7 +137,7 @@ export function valueAt(ds: Dataset, name: string, i: number): string {
   const c = ds.columns[name];
   if (!c) return '';
   if (c.kind === 'category') return c.categories[c.codes[i]] ?? '';
-  if (c.kind === 'text') return c.values[i] ?? '';
+  if (c.kind === 'text') return c.at(i);
   const v = c.values[i];
   if (!Number.isFinite(v)) return '—';
   return c.format ? c.format(v) : shortNumber(v);
@@ -126,22 +161,4 @@ export function histogram(col: CategoryColumn, mask?: Uint8Array): Int32Array {
     if (c >= 0) out[c]++;
   }
   return out;
-}
-
-/** Equal-width binning of a numeric column into `bins` buckets. */
-export function binNumeric(col: NumericColumn, bins: number): { codes: Int32Array; edges: Float64Array } {
-  const { values, min, max } = col;
-  const span = max - min || 1;
-  const codes = new Int32Array(values.length);
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    if (!Number.isFinite(v)) { codes[i] = -1; continue; }
-    let b = Math.floor(((v - min) / span) * bins);
-    if (b >= bins) b = bins - 1;
-    if (b < 0) b = 0;
-    codes[i] = b;
-  }
-  const edges = new Float64Array(bins + 1);
-  for (let i = 0; i <= bins; i++) edges[i] = min + (span * i) / bins;
-  return { codes, edges };
 }

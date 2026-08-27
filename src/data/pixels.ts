@@ -48,10 +48,11 @@ import { Dataset, Column, numeric, categoryFromCodes } from './columnar';
 export const PIXEL_IMAGES = ['starry-night', 'great-wave', 'millot-papillons'] as const;
 export type PixelImage = (typeof PIXEL_IMAGES)[number];
 
-const IMAGE_TITLES: Record<PixelImage, string> = {
+/** The one display title per image: menu, dataset name and toast all read this. */
+export const PIXEL_TITLES: Record<PixelImage, string> = {
   'starry-night': 'Starry Night Over the Rhône',
   'great-wave': 'The Great Wave off Kanagawa',
-  'millot-papillons': 'Papillons (Larousse pour tous)',
+  'millot-papillons': 'Millot’s Butterflies',
 };
 
 /* ------------------------------------------------------------------------ *
@@ -130,6 +131,12 @@ const NEUTRAL_SATURATION = 8; // HSL saturation, %
 // 5 tone bands with FIXED L* thresholds (not quantiles), so "Mid" means the
 // same thing across every image.
 const TONE_NAMES = ['Shadow', 'Dark', 'Mid', 'Light', 'Highlight'];
+// Tone bands are lightness, not hue, so pin a grey ramp rather than let the
+// categorical palette paint "Shadow" blue. Hue family needs no pin: its labels
+// are colour names and palette.ts auto-detects them.
+const TONE_COLORS: Record<string, string> = {
+  Shadow: '#3a3a38', Dark: '#6a6a66', Mid: '#9a9a94', Light: '#c8c8c2', Highlight: '#f2f2ee',
+};
 
 /* ------------------------------------------------------------------------ *
  * Hot loop.
@@ -299,13 +306,14 @@ function buildDataset(
   facets.push('X', 'Y', 'R', 'G', 'B', 'Luminance', 'Hue', 'Saturation', 'Lightness', 'L*', 'a*', 'b*', 'Chroma');
 
   return {
-    name: `${IMAGE_TITLES[image]} — ${n.toLocaleString()} pixels`,
+    name: `${PIXEL_TITLES[image]} — ${n.toLocaleString()} pixels`,
     n,
     columns,
     rgb: p.rgb,
     cards: false,
     labelColumn: 'Hue family',
     facets,
+    colors: { Tone: TONE_COLORS },
   };
 }
 

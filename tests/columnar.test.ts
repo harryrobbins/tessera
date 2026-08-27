@@ -5,7 +5,6 @@ import {
   categoryFromCodes,
   text,
   histogram,
-  binNumeric,
   shortNumber,
   valueAt,
   type Dataset,
@@ -74,30 +73,6 @@ describe('histogram', () => {
     const mask = Uint8Array.from([0, 0, 0, 0, 0, 0, 0]);
     const h = histogram(col, mask);
     expect(Array.from(h)).toEqual([0, 0, 0]);
-  });
-});
-
-describe('binNumeric', () => {
-  it('computes equal-width edges and bins values, with the max in the last bin', () => {
-    const col = numeric('v', [0, 2, 4, 6, 8, 10]);
-    const { codes, edges } = binNumeric(col, 5);
-    expect(Array.from(edges)).toEqual([0, 2, 4, 6, 8, 10]);
-    expect(Array.from(codes)).toEqual([0, 1, 2, 3, 4, 4]);
-  });
-
-  it('assigns code -1 to non-finite values', () => {
-    const col = numeric('v', [1, NaN, 5, Infinity]);
-    const { codes } = binNumeric(col, 4);
-    expect(codes[1]).toBe(-1);
-    expect(codes[3]).toBe(-1);
-  });
-
-  it('handles a degenerate column where min===max', () => {
-    const col = numeric('v', [5, 5, 5]);
-    const { codes, edges } = binNumeric(col, 4);
-    // span falls back to 1, so every value maps to bin 0.
-    expect(Array.from(codes)).toEqual([0, 0, 0]);
-    expect(edges[0]).toBe(5);
   });
 });
 

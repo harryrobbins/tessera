@@ -1,24 +1,7 @@
-import { Dataset, Column, numeric, categoryFromCodes, text, shortNumber } from './columnar';
+import { Dataset, Column, numeric, categoryFromCodes, derivedText, shortNumber } from './columnar';
+import { mulberry32, gaussian } from './random';
 
 export const PRODUCT_SIZES = [1000, 10_000, 100_000, 500_000, 1_000_000] as const;
-
-/** Deterministic PRNG — same seed always produces the same dataset. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function gaussian(rand: () => number): number {
-  let u = rand();
-  if (u < 1e-9) u = 1e-9;
-  const v = rand();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
 
 /** Deterministic pseudo-random hash in [0,1) — used to shape fixed per-type/per-country structure. */
 function hash01(x: number): number {
@@ -128,8 +111,6 @@ export function generateProducts(n: number, seed = 7): Dataset {
 
   // Titles are only worth materialising for datasets small enough that a
   // per-row string column doesn't dominate memory/build time.
-  const buildLabels = n <= 50_000;
-  const labels = buildLabels ? new Array<string>(n) : null;
 
   for (let i = 0; i < n; i++) {
     const rt = rand();
@@ -163,7 +144,6 @@ export function generateProducts(n: number, seed = 7): Dataset {
     if (m > 45) m = 45;
     margins[i] = m;
 
-    if (labels) labels[i] = `${TYPES[t]} — ${COUNTRIES[c]} ${years[i]}`;
   }
 
   const columns: Record<string, Column> = {
@@ -175,13 +155,15 @@ export function generateProducts(n: number, seed = 7): Dataset {
     Units: numeric('Units', units),
     Margin: numeric('Margin', margins, (v) => `${v.toFixed(1)}%`),
   };
-  if (labels) columns.Product = text('Product', labels);
+  // Derived, not stored: at two million rows the same strings would cost
+  // ~140 MB, and every part of them is already in memory.
+  columns.Product = derivedText('Product', (i) => `${TYPES[typeCodes[i]]} — ${COUNTRIES[countryCodes[i]]} ${years[i]}`);
 
   return {
     name: `Products (${n.toLocaleString()})`,
     n,
     columns,
-    labelColumn: labels ? 'Product' : 'Type',
+    labelColumn: 'Product',
     facets: ['Type', 'Country', 'Region', 'Year', 'Value', 'Units', 'Margin'],
   };
 }
