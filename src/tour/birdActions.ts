@@ -41,12 +41,12 @@ export function featuredBird(ds: Dataset, mask: Uint8Array | null = null): numbe
  *
  * Where this tour differs from the tax one is that the cards are photographs.
  * Two steps are shaped by that. The map opens in **True colour** — each card
- * drawn in the average colour of its own picture, which at that zoom is nine
- * hundred coloured points of real plumage — before the next step recolours it
+ * drawn in the average colour of its own picture, which at that zoom is two
+ * thousand coloured points of real plumage — before the next step recolours it
  * by Habitat, so the viewer sees the engine repaint a picture they have
  * already read. And the two filter steps refit the camera, which the tax tour
- * never needs: those filters run in the grid, where dropping from nine hundred
- * cards to eleven leaves the survivors as a speck in the middle of a board
+ * never needs: those filters run in the grid, where dropping from two thousand
+ * cards to twenty leaves the survivors as a speck in the middle of a board
  * still framed for the whole collection.
  */
 export function buildBirdSteps(host: TourHost): TourStep[] {
@@ -126,8 +126,8 @@ export function buildBirdSteps(host: TourHost): TourStep[] {
       },
     },
     dispersal: {
-      // Mass runs from a two-gram woodstar to a thirty-five-kilo cassowary and
-      // Range size from a single island to a third of the planet, so raw
+      // Mass runs from a two-gram woodstar to a hundred-and-eleven-kilo ostrich
+      // and Range size from a single island to a third of the planet, so raw
       // coordinates would pile every card into one corner. The cross-tab bins
       // both by rank, which is what makes the migratory colours climb the
       // diagonal instead of hiding in a smear. The axis menus are what changes
@@ -220,7 +220,7 @@ export function buildBirdSteps(host: TourHost): TourStep[] {
     'nothing-lost': {
       // Not the clear link: the action removes it, so by the time the caption
       // is up the spotlight would fall back to the whole sidebar. The Habitat
-      // facet is where the counts visibly go back to nine hundred.
+      // facet is where the counts visibly go back to two thousand.
       target: () => host.el(`#facets .facet[data-field="${css(BIRD_COL.habitat)}"]`) ?? host.el('#facets'),
       minMs: 1200,
       // The record modal is still open from the previous step, and it makes

@@ -51,32 +51,32 @@ const median = (rows: number[], field: string) => {
 };
 
 describe('the birds narration is true of the data', () => {
-  it('world: nine hundred birds, half of them south of the equator', () => {
-    expect(line('world')).toContain('Nine hundred');
-    expect(n).toBe(900);
+  it('world: two thousand birds, half of them south of the equator', () => {
+    expect(line('world')).toContain('Two thousand');
+    expect(n).toBe(2000);
     const lat = values(BIRD_COL.latitude);
     const south = all.filter((i) => lat[i] < 0).length / n;
     expect(south).toBeGreaterThan(0.45);
     expect(south).toBeLessThan(0.55);
   });
 
-  it('habitat: six in ten are forest birds, and forty-one are marine', () => {
+  it('habitat: close to two in three are forest birds, and sixty-five are marine', () => {
     const forest = share(all, BIRD_COL.habitat, BIRD_VAL.forest);
-    expect(forest).toBeGreaterThan(0.55);
-    expect(forest).toBeLessThan(0.65);
-    expect(line('habitat')).toContain('forty-one');
-    expect(by(BIRD_COL.habitat, BIRD_VAL.marine)).toHaveLength(41);
+    expect(forest).toBeGreaterThan(0.6);
+    expect(forest).toBeLessThan(0.7);
+    expect(line('habitat')).toContain('sixty-five');
+    expect(by(BIRD_COL.habitat, BIRD_VAL.marine)).toHaveLength(65);
   });
 
-  it('orders: thirty of them, one card in four a perching bird', () => {
-    expect(line('orders')).toContain('thirty');
-    expect(categories(BIRD_COL.order)).toHaveLength(30);
+  it('orders: thirty-one of them, more than half a perching bird', () => {
+    expect(line('orders')).toContain('thirty-one');
+    expect(categories(BIRD_COL.order)).toHaveLength(31);
     const perching = share(all, BIRD_COL.order, BIRD_VAL.passeriformes);
-    expect(perching).toBeGreaterThan(0.22);
-    expect(perching).toBeLessThan(0.28);
+    expect(perching).toBeGreaterThan(0.5);
+    expect(perching).toBeLessThan(0.65);
   });
 
-  it('bands: seven rungs, a two-gram woodstar to a thirty-five-kilo cassowary', () => {
+  it('bands: seven rungs, a two-gram woodstar to a hundred-and-eleven-kilo ostrich', () => {
     expect(categories(BIRD_COL.massBand)).toHaveLength(7);
     const mass = values(BIRD_COL.mass);
     const cn = names();
@@ -84,36 +84,36 @@ describe('the birds narration is true of the data', () => {
     const heaviest = all.reduce((b, i) => (mass[i] > mass[b] ? i : b), 0);
     expect(mass[lightest]).toBeLessThan(3);
     expect(cn[lightest].toLowerCase()).toContain('woodstar');
-    expect(mass[heaviest] / 1000).toBeGreaterThan(30);
-    expect(mass[heaviest] / 1000).toBeLessThan(40);
-    expect(cn[heaviest].toLowerCase()).toContain('cassowary');
+    expect(mass[heaviest] / 1000).toBeGreaterThan(100);
+    expect(mass[heaviest] / 1000).toBeLessThan(120);
+    expect(cn[heaviest].toLowerCase()).toContain('ostrich');
   });
 
-  it('diet: a nectar feeder is five grams, a vertebrate eater a hundred times more', () => {
+  it('diet: a nectar feeder is seven grams, a vertebrate eater seventy times more', () => {
     const nectar = median(by(BIRD_COL.diet, BIRD_VAL.nectar), BIRD_COL.mass);
     const verts = median(by(BIRD_COL.diet, BIRD_VAL.vertebrates), BIRD_COL.mass);
-    expect(nectar).toBeGreaterThan(4);
-    expect(nectar).toBeLessThan(7);
-    expect(verts / nectar).toBeGreaterThan(70);
+    expect(nectar).toBeGreaterThan(6);
+    expect(nectar).toBeLessThan(9);
+    expect(verts / nectar).toBeGreaterThan(60);
   });
 
-  it('dispersal: sedentary twenty-five, migratory forty-nine, over eight times the range', () => {
+  it('dispersal: sedentary twenty, migratory forty-one, over sixteen times the range', () => {
     const sed = by(BIRD_COL.migration, BIRD_VAL.sedentary);
     const mig = by(BIRD_COL.migration, BIRD_VAL.migratory);
-    expect(median(sed, BIRD_COL.handWing)).toBeGreaterThan(24);
-    expect(median(sed, BIRD_COL.handWing)).toBeLessThan(26);
-    expect(median(mig, BIRD_COL.handWing)).toBeGreaterThan(48);
-    expect(median(mig, BIRD_COL.handWing)).toBeLessThan(50);
+    expect(median(sed, BIRD_COL.handWing)).toBeGreaterThan(18);
+    expect(median(sed, BIRD_COL.handWing)).toBeLessThan(21);
+    expect(median(mig, BIRD_COL.handWing)).toBeGreaterThan(40);
+    expect(median(mig, BIRD_COL.handWing)).toBeLessThan(43);
     const ratio = median(mig, BIRD_COL.range) / median(sed, BIRD_COL.range);
-    expect(ratio).toBeGreaterThan(7);
-    expect(ratio).toBeLessThan(9.5);
+    expect(ratio).toBeGreaterThan(14);
+    expect(ratio).toBeLessThan(18.5);
   });
 
-  it('ocean: forty-one seabirds, and the highest hand-wing index of any habitat', () => {
+  it('ocean: sixty-five seabirds, and the highest hand-wing index of any habitat', () => {
     const marine = by(BIRD_COL.habitat, BIRD_VAL.marine);
-    expect(marine).toHaveLength(41);
+    expect(marine).toHaveLength(65);
     const med = median(marine, BIRD_COL.handWing);
-    expect(med).toBeGreaterThan(58);
+    expect(med).toBeGreaterThan(55);
     expect(med).toBeLessThan(63);
     // "the highest of any habitat here" — so no other habitat may beat it.
     for (const hb of categories(BIRD_COL.habitat)) {
@@ -122,24 +122,27 @@ describe('the birds narration is true of the data', () => {
     }
   });
 
-  it('voyagers: eleven marine migrants — two petrels, a shearwater, two eiders, five auks, a tropicbird', () => {
+  it('voyagers: twenty marine migrants — shearwaters and petrels, storm-petrels, auks, eiders, a skua, a tropicbird', () => {
     const marine = by(BIRD_COL.habitat, BIRD_VAL.marine);
     const voyagers = marine.filter((i) => label(BIRD_COL.migration)(i) === BIRD_VAL.migratory);
-    expect(voyagers).toHaveLength(11);
-    const cn = names();
-    const count = (word: string) => voyagers.filter((i) => cn[i].toLowerCase().includes(word)).length;
-    expect(count('petrel')).toBe(2);
-    expect(count('shearwater')).toBe(1);
-    expect(count('eider')).toBe(2);
-    expect(count('tropicbird')).toBe(1);
-    // The five auks are an Alcidae count, not a name match: a murrelet, a
-    // puffin, two auklets and a guillemot are all auks and none says so.
-    const auks = voyagers.filter((i) => label(BIRD_COL.family)(i) === 'Alcidae');
-    expect(auks).toHaveLength(5);
-    expect(2 + 1 + 2 + 1 + auks.length).toBe(voyagers.length);
+    expect(voyagers).toHaveLength(20);
+    const fam = label(BIRD_COL.family);
+    const familyCount = (name: string) => voyagers.filter((i) => fam(i) === name).length;
+    // Shearwaters and true petrels are one family; storm-petrels split across
+    // two (the southern Oceanitidae and the northern Hydrobatidae) — the
+    // narration groups them by what they are, not by which family each sits
+    // in, and two of the six carry no English common name in this bake, so a
+    // name match would miss them where a family match will not.
+    expect(familyCount('Procellariidae')).toBe(5);
+    expect(familyCount('Oceanitidae') + familyCount('Hydrobatidae')).toBe(6);
+    expect(familyCount('Alcidae')).toBe(5);
+    expect(familyCount('Anatidae')).toBe(2);
+    expect(familyCount('Stercorariidae')).toBe(1);
+    expect(familyCount('Phaethontidae')).toBe(1);
+    expect(5 + 6 + 5 + 2 + 1 + 1).toBe(voyagers.length);
   });
 
-  it('one bird: the red-tailed tropicbird tops the eleven at sixty-nine', () => {
+  it('one bird: the red-tailed tropicbird tops the twenty at sixty-nine', () => {
     const marine = by(BIRD_COL.habitat, BIRD_VAL.marine);
     const voyagers = marine.filter((i) => label(BIRD_COL.migration)(i) === BIRD_VAL.migratory);
     const hwi = values(BIRD_COL.handWing);

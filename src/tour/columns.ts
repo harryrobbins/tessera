@@ -39,19 +39,22 @@ export const UI = {
 } as const;
 
 /**
- * The birds tour's binding, to the 900-row bake rather than the 2,000-row one.
+ * The birds tour's binding, to the 2,000-row bake.
  *
- * Two reasons, both about what the narration asks the viewer to look at. The
- * 900 sheet paints a 128 px tile per card, so the zoom, the one card and the
- * detail steps show a photograph that still holds together on screen; the
- * 2,000 sheet is a 64 px mosaic, which is the right trade for a wall of two
- * thousand birds and the wrong one for a tour that ends on a single bird's
- * face. And every category in the 900 bake is filled in, where the 2,000 one
- * carries an Unknown level in Habitat, Diet, Trophic level and Migration — so
- * every share the narration quotes is a share of birds actually classified,
- * with no silent "and the rest" bucket behind it.
+ * At 2,000 rows the renderer's base card slot is 64 px rather than 900's
+ * 128 px (`slotFor`, `src/gl/atlas.ts`, keyed on row count alone) — most of
+ * the tour reads as a colour mosaic rather than individually legible
+ * photographs, sharpening only once a card is flown to and zoomed (the
+ * `one-bird` step) or opened in the modal, which always fetches full
+ * resolution from Commons regardless of dataset size. A deliberate trade for
+ * the bigger collection, not an oversight.
+ *
+ * The 2,000 bake also carries a small "Unknown" level in Habitat, Diet,
+ * Trophic level and Migration that the 900 one does not (about 0.2–0.6 % of
+ * rows) — small enough that every share the narration quotes is still, in
+ * effect, a share of birds actually classified.
  */
-export const BIRD_TOUR_DATASET = 'birds:900';
+export const BIRD_TOUR_DATASET = 'birds:2000';
 
 export const BIRD_COL = {
   commonName: 'Common name',

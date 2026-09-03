@@ -68,7 +68,7 @@ export const NARRATION: NarrationLine[] = [
 
 /**
  * The birds tour. A second collection, a second story: the tax cases are a map
- * of one country in flat colour, and this is nine hundred pictures of real
+ * of one country in flat colour, and this is two thousand pictures of real
  * animals, so the steps that show colour, the grid and one card up close are
  * doing quite different work here.
  *
@@ -77,41 +77,41 @@ export const NARRATION: NarrationLine[] = [
  * plates rather than photographs. So the narration says "picture", never
  * "photograph" — tests/tour-birds-story.test.ts holds that line. Same rules as above — bold **terms** must
  * name a column or a category value in columns.ts, and every number is checked
- * against `public/data/birds-900.json` by tests/tour-birds-story.test.ts.
+ * against `public/data/birds-2000.json` by tests/tour-birds-story.test.ts.
  */
 export const BIRDS_NARRATION: NarrationLine[] = [
   { id: 'open', title: 'Welcome',
     text: 'Welcome to Tessera. Every tile is one bird, and every picture is that bird — a photograph, or a nineteenth-century plate. Nothing is ever redrawn; the tiles simply fly.' },
   { id: 'world', title: 'A world of birds',
-    text: 'Nine hundred species, plotted by **Longitude** and **Latitude**. Every light is one bird, in the average colour of its own picture, and half live south of the equator.' },
+    text: 'Two thousand species, plotted by **Longitude** and **Latitude**. Every light is one bird, in the average colour of its own picture, and half live south of the equator.' },
   { id: 'habitat', title: 'Where they live',
-    text: 'Colour by **Habitat**, and the forest takes over: six of every ten are **Forest** birds, while only forty-one — the **Marine** ones — live out on the open sea.' },
-  { id: 'orders', title: 'Thirty orders',
-    text: 'Bars stack the same cards by **Order**. There are thirty of them, and one card in four is a **Passeriformes** — a perching bird.' },
-  { id: 'bands', title: 'Two grams to thirty-five kilos',
-    text: 'Bucket by **Mass band**: seven rungs, from under ten grams to over two kilos. The lightest here is a two-gram woodstar, the heaviest a thirty-five-kilo cassowary.' },
+    text: 'Colour by **Habitat**, and the forest takes over: close to two in three are **Forest** birds, while only sixty-five — the **Marine** ones — live out on the open sea.' },
+  { id: 'orders', title: 'Thirty-one orders',
+    text: 'Bars stack the same cards by **Order**. There are thirty-one of them, and more than half are **Passeriformes** — perching birds.' },
+  { id: 'bands', title: 'Two grams to a hundred and eleven kilos',
+    text: 'Bucket by **Mass band**: seven rungs, from under ten grams to over two kilos. The lightest here is a two-gram woodstar, the heaviest a hundred-and-eleven-kilo ostrich.' },
   { id: 'diet', title: 'What they eat',
-    text: 'Cross-tab **Diet** against **Mass band**. Every **Nectar** feeder is tiny — five grams is typical — while the birds that take **Vertebrates** weigh a hundred times more.' },
+    text: 'Cross-tab **Diet** against **Mass band**. Every **Nectar** feeder is tiny — seven grams is typical — while the birds that take **Vertebrates** weigh seventy times more.' },
   { id: 'dispersal', title: 'The shape of a wing',
-    text: '**Hand-wing index** measures how far a wing can carry a bird. A **Sedentary** species scores twenty-five; a **Migratory** one, forty-nine, over a range eight times wider.' },
-  { id: 'wall', title: 'Nine hundred pictures',
+    text: '**Hand-wing index** measures how far a wing can carry a bird. A **Sedentary** species scores twenty; a **Migratory** one, forty-one, over a range sixteen times wider.' },
+  { id: 'wall', title: 'Two thousand pictures',
     text: 'Back to the grid, sorted and coloured by **Hand-wing index**: short round wings at one end, and at the other the birds that cross oceans.' },
   { id: 'ocean', title: 'Out to sea',
-    text: 'Tick **Marine** under **Habitat**. Forty-one seabirds are left, and their typical **Hand-wing index** is sixty — the highest of any habitat here.' },
-  { id: 'voyagers', title: 'The eleven',
-    text: 'Filters combine. Add **Migratory** under **Migration** and eleven birds remain: two petrels and a shearwater, two eiders, five auks, and one tropicbird.' },
+    text: 'Tick **Marine** under **Habitat**. Sixty-five seabirds are left, and their typical **Hand-wing index** is sixty — the highest of any habitat here.' },
+  { id: 'voyagers', title: 'The twenty',
+    text: 'Filters combine. Add **Migratory** under **Migration** and twenty birds remain: five shearwaters and petrels, six storm-petrels, five auks, two eiders, a skua, and a tropicbird.' },
   { id: 'closer', title: 'Closer',
     text: 'Zoom with the wheel, or the plus and minus buttons, and drag to pan. Up close each card shows the bird, its species, and what it weighs.' },
   { id: 'one-bird', title: 'One bird',
-    text: 'Click the card at the far end. A red-tailed tropicbird: **Marine**, **Migratory**, hunting **Aquatic prey**, with a **Hand-wing index** of sixty-nine — the highest of the eleven.' },
+    text: 'Click the card at the far end. A red-tailed tropicbird: **Marine**, **Migratory**, hunting **Aquatic prey**, with a **Hand-wing index** of sixty-nine — the highest of the twenty.' },
   { id: 'credit', title: 'The whole bird',
     text: 'The detail view opens the full picture, with the taxonomy, the measurements, the range — and the **Photographer** and licence that let us show it.' },
   { id: 'nothing-lost', title: 'Nothing lost',
-    text: 'Clear the filters, and all nine hundred birds return to their places. Filters never destroy anything; they only choose what you are looking at.' },
+    text: 'Clear the filters, and all two thousand birds return to their places. Filters never destroy anything; they only choose what you are looking at.' },
   { id: 'frame', title: 'The whole world again',
     text: 'Press F, or the Fit button, and the whole world of birds is back in frame.' },
   { id: 'your-turn', title: 'Your turn',
-    text: 'That is the tour: nine hundred birds, and one tropicbird at the end of it. Replay it any time from the Tour button, then choose a collection of your own.' },
+    text: 'That is the tour: two thousand birds, and one tropicbird at the end of it. Replay it any time from the Tour button, then choose a collection of your own.' },
 ];
 
 /**
@@ -144,7 +144,7 @@ export const TOUR_SCRIPTS: TourScript[] = [
   {
     id: 'birds',
     label: 'Birds of the world',
-    blurb: 'Nine hundred species, each with its own portrait, from a world map down to one ocean-crossing tropicbird.',
+    blurb: 'Two thousand species, each with its own portrait, from a world map down to one ocean-crossing tropicbird.',
     audioBase: 'audio/tour/birds/',
     lines: BIRDS_NARRATION,
   },
