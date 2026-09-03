@@ -127,7 +127,7 @@ async function newContext(browser, { stubAudio, fastMs, seed }) {
     sessionStorage.setItem('e2e-seeded', '1');
     for (const [k, v] of Object.entries(seed)) v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v);
   }, { fastMs, seed });
-  if (stubAudio) await ctx.route('**/audio/tour/*.mp3', (route) => route.fulfill({ status: 404, body: 'stub' }));
+  if (stubAudio) await ctx.route('**/audio/tour/**/*.mp3', (route) => route.fulfill({ status: 404, body: 'stub' }));
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -149,6 +149,8 @@ async function steppedPass(browser) {
   await page.click('.tour-start');
 
   let prev = await appState(page);
+  /** Where the docked card sat on the first step; every later step must match. */
+  let dock = null;
   for (let i = 0; i < NARRATION.length; i++) {
     const line = NARRATION[i];
     await waitFor(page, (id) => window.tessera?.tour?.stepId === id, line.id);
@@ -174,21 +176,46 @@ async function steppedPass(browser) {
     if (spotless.has(line.id)) check(!o.hasSpot, `${line.id}: no spotlight`);
     else check(o.hasSpot && o.under !== null, `${line.id}: spotlight over ${o.under}`);
     const geo = await page.evaluate(() => {
-      const c = document.querySelector('.tour-card:not(.tour-welcome)').getBoundingClientRect();
+      const card = document.querySelector('.tour-card:not(.tour-welcome)');
+      const c = card.getBoundingClientRect();
       const sp = document.querySelector('.tour-spot');
       const s = sp && !sp.hidden ? sp.getBoundingClientRect() : null;
       const inside = c.left >= 0 && c.top >= 0 && c.right <= innerWidth && c.bottom <= innerHeight;
       const overlaps = s ? !(c.right <= s.left || c.left >= s.right || c.bottom <= s.top || c.top >= s.bottom) : false;
-      const gap = s ? Math.min(Math.abs(c.top - s.bottom), Math.abs(s.top - c.bottom), Math.abs(c.left - s.right), Math.abs(s.left - c.right)) : null;
-      const arrow = getComputedStyle(document.querySelector('.tour-arrow')).display !== 'none';
+      const beamEl = document.querySelector('.tour-beam');
+      const pts = beamEl.querySelector('.cone')?.getAttribute('points') ?? '';
+      const beam = {
+        shown: !beamEl.hasAttribute('hidden'),
+        lit: beamEl.classList.contains('on'),
+        // The far edge of the cone is the target's own silhouette, so its last
+        // two points are the machine-checkable form of "it points at the right
+        // thing". A huge target gets a parallel shaft instead, which lands on
+        // the same rectangle, so the assertion holds for both.
+        onTarget: s === null ? null : pts.split(' ').slice(1, 3).every((q) => {
+          const [x, y] = q.split(',').map(Number);
+          const pad = 28;
+          return Number.isFinite(x) && Number.isFinite(y)
+            && x > s.left - pad && x < s.right + pad && y > s.top - pad && y < s.bottom + pad;
+        }),
+        finite: pts !== '' && !/NaN|Infinity/.test(pts),
+      };
       const r = (b) => b && [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)];
-      return { inside, overlaps, gap, arrow, card: r(c), spot: r(s), side: [...document.querySelector('.tour-card:not(.tour-welcome)').classList].find((k) => k.startsWith('side-')) };
+      return { inside, overlaps, beam, dock: [Math.round(innerWidth - c.right), Math.round(innerHeight - c.bottom)], card: r(c), spot: r(s) };
     });
     check(geo.inside, `${line.id}: card inside viewport`);
+    // The lamp does not move: that is the whole point of docking it. Only the
+    // distances to the right and bottom edges are checked — the top edge
+    // legitimately rises and falls with the length of the caption.
+    if (dock === null) dock = geo.dock;
+    else check(Math.abs(geo.dock[0] - dock[0]) <= 1 && Math.abs(geo.dock[1] - dock[1]) <= 1,
+      `${line.id}: card still docked at ${JSON.stringify(geo.dock)} (was ${JSON.stringify(dock)})`);
     if (!spotless.has(line.id)) {
-      check(!geo.overlaps && geo.gap !== null && geo.gap <= 40 && geo.arrow,
-        `${line.id}: card adjacent to spotlight (${geo.side}, gap ${geo.gap}px, arrow ${geo.arrow}`
-        + `${geo.overlaps ? `, OVERLAPS card ${geo.card} spot ${geo.spot}` : ''})`);
+      check(!geo.overlaps, `${line.id}: card clear of the spotlight`
+        + `${geo.overlaps ? ` (OVERLAPS card ${geo.card} spot ${geo.spot})` : ''}`);
+      check(geo.beam.shown && geo.beam.lit && geo.beam.finite && geo.beam.onTarget,
+        `${line.id}: beam lands on the spotlight (${JSON.stringify(geo.beam)})`);
+    } else {
+      check(!geo.beam.shown, `${line.id}: no beam`);
     }
     const state = await tourState(page);
     check(state.index === i, `${line.id}: engine index ${state.index}`);

@@ -390,27 +390,84 @@ button.ghost { background: transparent; }
 /* Above #overlay (40): the tour frames the whole application, including the
    record modal, and its controls have to stay clickable over the scrim. */
 .tour { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
-.tour-spot {
-  position: fixed; border-radius: 10px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .6), 0 0 0 3px var(--accent), 0 0 24px 4px rgba(57, 135, 229, .55);
-  pointer-events: none;
-  transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease;
+
+/* The page is veiled, not blacked out. At .18 the topbar labels and the facet
+   counts are still readable, which matters because the narration talks about
+   numbers that are on screen; what singles the target out is that it is lit,
+   not that everything else has been put out. */
+.tour-veil {
+  position: fixed; inset: 0; pointer-events: none;
+  background: rgba(5, 7, 11, .18);
+  opacity: 0; transition: opacity .3s ease;
 }
-/* Following a card on the canvas: be on it, not behind it. */
-.tour-spot.tracking { transition: none; }
-/* The card sits beside whatever is spotlit; JS sets left/top and a side-* class. */
+.tour.up .tour-veil { opacity: 1; }
+
+/* The beam. User units are CSS pixels — no viewBox — so ui.ts can write screen
+   coordinates straight into the attributes. */
+.tour-beam {
+  position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none;
+  opacity: 0; transition: opacity .2s linear;
+}
+.tour-beam.on { opacity: 1; }
+/* `hidden` is not a property on an SVG element, so ui.ts sets the attribute
+   and the UA stylesheet's HTML-only [hidden] rule does not cover it. */
+.tour-beam[hidden] { display: none; }
+.tour-beam .bulb { fill: rgba(150, 200, 255, .16); }
+.tour-beam .lamp { fill: rgba(190, 220, 255, .9); }
+.tour-beam .head { fill: rgba(198, 226, 255, .95); }
+
+/* The light in transit, from the lamp to the target. Centred on its own
+   position so a single translate3d places it. */
+.tour-glow {
+  position: fixed; left: 0; top: 0; width: 160px; height: 160px; margin: -80px 0 0 -80px;
+  border-radius: 50%; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, rgba(160, 205, 255, .42) 0%, rgba(120, 175, 255, .18) 42%, rgba(90, 150, 240, 0) 70%);
+  will-change: transform, opacity;
+}
+
+/* The lit target. Geometry is written instantly and never transitioned — a
+   .35s ease on left/top left the ring trailing the card it was pointing at —
+   so only the opacity animates, as the travelling light arrives. */
+.tour-spot {
+  position: fixed; border-radius: 10px; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(150, 200, 255, .13), rgba(150, 200, 255, .03) 70%, transparent);
+  box-shadow: 0 0 0 1.5px rgba(150, 200, 255, .95),
+              0 0 0 5px rgba(57, 135, 229, .3),
+              0 0 20px 5px rgba(90, 160, 255, .32);
+  opacity: 0; transition: opacity .22s ease;
+}
+.tour-spot.lit { opacity: 1; }
+.tour-spot::after {
+  content: ""; position: absolute; inset: -6px; border-radius: 14px;
+  box-shadow: 0 0 40px 14px rgba(80, 150, 240, .26);
+  animation: tour-breathe 2.6s ease-in-out infinite alternate;
+  will-change: opacity;
+}
+/* Following a card on the canvas: rasterising a 40px shadow at a new size
+   every frame is exactly the wrong thing to do while the camera is moving. */
+.tour-spot.tracking::after { animation: none; }
+@keyframes tour-breathe { from { opacity: .5 } to { opacity: 1 } }
+
+/* The lamp. Docked bottom-right for the whole tour — the one corner this
+   layout never puts anything the tour points at — so the words stay where the
+   eye last left them. Only `transform` ever moves it, and only in the corner
+   case where a target would otherwise be underneath it. */
 .tour-card {
-  position: fixed; left: 0; top: 0;
-  width: min(440px, calc(100vw - 24px));
+  position: fixed; right: 20px; bottom: 20px;
+  width: min(420px, calc(100vw - 40px)); min-height: 176px;
   padding: 14px 18px 14px; border-radius: 12px;
   background: var(--surface-3); border: 1.5px solid #4a4a46; color: var(--ink);
   border-left: 5px solid var(--accent);
   box-shadow: 0 18px 48px rgba(0,0,0,.7), 0 0 0 1px rgba(0,0,0,.6);
   pointer-events: auto;
   display: flex; flex-direction: column; gap: 10px;
-  transition: left .3s ease, top .3s ease;
+  transition: transform .26s cubic-bezier(.22,.61,.36,1);
 }
-.tour-card.floating, .tour-card.tracking { transition: none; }
+.tour-card.dock-bl { transform: translateX(var(--dock-dx, 0px)); }
+/* The `display: flex` above beats the UA stylesheet's `[hidden]` rule, so the
+   card needs its own — without it the empty step card sits in the dock behind
+   the welcome card, controls and all. */
+.tour-card[hidden] { display: none; }
 .tour-card h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.1px; }
 .tour-card h2[hidden] { display: none; }
 .tour-card p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--ink); }
@@ -418,7 +475,7 @@ button.ghost { background: transparent; }
 .tour-caption b { color: #8fbdf5; font-weight: 700; }
 .tour-head { display: flex; align-items: center; justify-content: space-between; }
 .tour-step { color: var(--accent); font-size: 11.5px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; font-variant-numeric: tabular-nums; }
-.tour-foot { display: flex; align-items: center; gap: 8px; }
+.tour-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
 .tour-foot .spacer { flex: 1; }
 .tour-card button {
   font: inherit; font-size: 13.5px; font-weight: 600; padding: 7px 14px; border-radius: 6px;
@@ -432,22 +489,35 @@ button.ghost { background: transparent; }
 .tour-card button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .tour-mute { font-size: 11.5px !important; font-weight: 500 !important; padding: 3px 9px !important; }
 .tour-mute[aria-pressed="true"] { color: var(--ink-3); }
-/* Arrow: a rotated square on the edge facing the target. */
-.tour-arrow {
-  position: absolute; width: 16px; height: 16px; background: var(--surface-3);
-  border: 1.5px solid #4a4a46; transform: rotate(45deg); display: none;
+/* The collection picker on the welcome card. */
+.tour-picks { display: flex; flex-direction: column; gap: 8px; }
+.tour-pick {
+  display: flex !important; flex-direction: column; gap: 3px; align-items: flex-start;
+  text-align: left; padding: 10px 12px !important; width: 100%;
+  border: 1.5px solid #4a4a46 !important; border-radius: 8px;
+  background: var(--surface-2) !important; cursor: pointer;
 }
-.tour-card.side-below .tour-arrow { display: block; top: -9px; margin-left: -8px; border-right: 0; border-bottom: 0; }
-.tour-card.side-above .tour-arrow { display: block; bottom: -9px; margin-left: -8px; border-left: 0; border-top: 0; }
-.tour-card.side-right .tour-arrow { display: block; left: -9px; margin-top: -8px; border-right: 0; border-top: 0; }
-.tour-card.side-left .tour-arrow { display: block; right: -9px; margin-top: -8px; border-left: 0; border-bottom: 0; }
-.tour-card.side-right { border-left: 1.5px solid #4a4a46; border-top: 5px solid var(--accent); }
-.tour-card.side-left { border-left: 1.5px solid #4a4a46; border-right: 5px solid var(--accent); }
+.tour-pick b { font-size: 14px; font-weight: 700; color: var(--ink); }
+.tour-pick span { font-size: 12.5px; font-weight: 400; line-height: 1.35; color: var(--ink-3); }
+.tour-pick:hover { background: var(--surface-1) !important; }
+.tour-pick[aria-pressed="true"] {
+  border-color: var(--accent) !important;
+  background: rgba(57, 135, 229, .14) !important;
+}
+.tour-pick[aria-pressed="true"] span { color: var(--ink-2); }
+
+/* Centred, and released from the dock: left+width+right, or top+bottom with an
+   auto height, would otherwise be over-constrained and stretch the card. */
 .tour-welcome {
-  left: 50% !important; top: 50% !important; transform: translate(-50%, -50%);
-  width: min(520px, calc(100vw - 24px)); transition: none;
+  left: 50% !important; top: 50% !important;
+  right: auto !important; bottom: auto !important;
+  transform: translate(-50%, -50%);
+  width: min(520px, calc(100vw - 24px)); min-height: 0; transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tour-spot, .tour-card { transition: none; }
+  /* No journey: the light is simply already there. */
+  .tour-glow { display: none !important; }
+  .tour-spot::after { animation: none; }
+  .tour-spot, .tour-card, .tour-veil, .tour-beam { transition: none; }
 }

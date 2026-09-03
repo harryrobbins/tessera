@@ -1,0 +1,114 @@
+{
+  "open": {
+    "hash": "6083c4bd3630d490",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 168,
+    "bytes": 110803
+  },
+  "world": {
+    "hash": "78a46de79bb86deb",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 159,
+    "bytes": 88233
+  },
+  "habitat": {
+    "hash": "05daa1109cf9e1a6",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 147,
+    "bytes": 93039
+  },
+  "orders": {
+    "hash": "6876d52745837552",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 120,
+    "bytes": 71933
+  },
+  "bands": {
+    "hash": "4d105962ce658dd1",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 158,
+    "bytes": 102653
+  },
+  "diet": {
+    "hash": "ba18a6d43a32cc5a",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 153,
+    "bytes": 84053
+  },
+  "dispersal": {
+    "hash": "714a36745ab339d2",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 158,
+    "bytes": 97219
+  },
+  "wall": {
+    "hash": "615aac924cd2b7ea",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 133,
+    "bytes": 70470
+  },
+  "ocean": {
+    "hash": "3335b5cc0b281a1d",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 133,
+    "bytes": 72977
+  },
+  "voyagers": {
+    "hash": "050c3d5a005d400b",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 144,
+    "bytes": 98264
+  },
+  "closer": {
+    "hash": "4cec667c165afcc1",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 136,
+    "bytes": 71097
+  },
+  "one-bird": {
+    "hash": "31f2dcdf2feed799",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 162,
+    "bytes": 103906
+  },
+  "credit": {
+    "hash": "2562aac8be642a47",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 142,
+    "bytes": 75276
+  },
+  "nothing-lost": {
+    "hash": "3a7ac064dd204ba6",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 143,
+    "bytes": 69216
+  },
+  "frame": {
+    "hash": "af8b7a8533be0b3f",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 74,
+    "bytes": 38496
+  },
+  "your-turn": {
+    "hash": "f4e6b8facc4227c9",
+    "voice": "TVmbglAk3F1GkiCoOq47",
+    "model": "eleven_multilingual_v2",
+    "chars": 153,
+    "bytes": 75276
+  }
+}

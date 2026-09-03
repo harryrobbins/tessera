@@ -1,34 +1,56 @@
 import { describe, it, expect } from 'vitest';
 import { fs, path, testsDir } from './helpers/nodefs';
-import { NARRATION, VOICE, spokenText } from '../src/tour/script';
+import { NARRATION, TOUR_SCRIPTS, VOICE, spokenText, type TourScript } from '../src/tour/script';
 import { COL, VAL, UI } from '../src/tour/columns';
 import { hashLine, fnv1a64 } from '../src/tour/hash';
 import { markup } from '../src/tour/ui';
 
 // testsDir is tests/helpers, so it takes two steps to reach the repo root.
-const AUDIO = path.resolve(testsDir, '..', '..', 'public', 'audio', 'tour');
-const manifestPath = path.join(AUDIO, 'manifest.json');
-const haveAudio = fs.existsSync(manifestPath);
+const PUBLIC = path.resolve(testsDir, '..', '..', 'public');
+const audioDir = (tour: TourScript) => path.join(PUBLIC, tour.audioBase);
+const manifestOf = (tour: TourScript) => path.join(audioDir(tour), 'manifest.json');
 
-describe('narration script', () => {
-  it('has unique kebab-case ids', () => {
-    const ids = NARRATION.map((l) => l.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const id of ids) expect(id).toMatch(/^[a-z][a-z0-9-]*$/);
+/** Every tour gets the same structural rules and the same audio contract. */
+for (const tour of TOUR_SCRIPTS) {
+  describe(`narration script (${tour.id})`, () => {
+    it('has unique kebab-case ids', () => {
+      const ids = tour.lines.map((l) => l.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (const id of ids) expect(id).toMatch(/^[a-z][a-z0-9-]*$/);
+    });
+
+    it('keeps every line between 8 and 30 words', () => {
+      for (const l of tour.lines) {
+        const words = spokenText(l.text).split(/\s+/).filter(Boolean).length;
+        expect(words, l.id).toBeGreaterThanOrEqual(8);
+        expect(words, l.id).toBeLessThanOrEqual(30);
+      }
+    });
+
+    it('has exactly sixteen lines', () => {
+      expect(tour.lines.length).toBe(16);
+    });
   });
+}
 
-  it('keeps every line between 8 and 30 words', () => {
-    for (const l of NARRATION) {
-      const words = spokenText(l.text).split(/\s+/).filter(Boolean).length;
-      expect(words, l.id).toBeGreaterThanOrEqual(8);
-      expect(words, l.id).toBeLessThanOrEqual(30);
+describe('tour registry', () => {
+  it('gives every tour its own id, label and clip directory', () => {
+    for (const key of ['id', 'label', 'blurb', 'audioBase'] as const) {
+      const seen = TOUR_SCRIPTS.map((t) => t[key]);
+      expect(new Set(seen).size, `two tours share a ${key}`).toBe(seen.length);
+    }
+    // A base that is a prefix of another's would put one tour's clips inside
+    // the other's directory, where the orphan sweep below would delete them.
+    for (const a of TOUR_SCRIPTS) {
+      for (const b of TOUR_SCRIPTS) {
+        if (a === b) continue;
+        expect(a.audioBase.startsWith(b.audioBase), `${a.id} nests inside ${b.id}`).toBe(false);
+      }
     }
   });
+});
 
-  it('has exactly sixteen lines', () => {
-    expect(NARRATION.length).toBe(16);
-  });
-
+describe('narration script', () => {
   it('only bolds column, value and UI names from columns.ts', () => {
     const known = new Set([...Object.values(COL), ...Object.values(VAL), ...Object.values(UI)].map((s) => s.toLowerCase()));
     // The dataset line names the collection rather than a column.
@@ -53,30 +75,38 @@ describe('hash', () => {
   });
 });
 
-describe.skipIf(!haveAudio)('voiceover audio', () => {
-  const manifest = haveAudio ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : {};
-  const voice = { voiceId: VOICE.voiceId, modelId: VOICE.modelId, outputFormat: VOICE.outputFormat, settings: VOICE.settings };
+for (const tour of TOUR_SCRIPTS) {
+  const manifestPath = manifestOf(tour);
+  const AUDIO = audioDir(tour);
+  const haveAudio = fs.existsSync(manifestPath);
 
-  it('has a clip per line whose hash matches the current text and voice (else run pnpm voiceover)', () => {
-    for (const l of NARRATION) {
-      const file = path.join(AUDIO, `${l.id}.mp3`);
-      expect(fs.existsSync(file), `${l.id}.mp3 missing`).toBe(true);
-      expect(fs.statSync(file).size, `${l.id}.mp3 too small`).toBeGreaterThan(5_000);
-      expect(manifest[l.id]?.hash, `${l.id}: narration or voice changed without regenerating`).toBe(hashLine(spokenText(l.text), voice));
-    }
-  });
+  describe.skipIf(!haveAudio)(`voiceover audio (${tour.id})`, () => {
+    const manifest = haveAudio ? JSON.parse(fs.readFileSync(manifestPath, 'utf8')) : {};
+    const voice = { voiceId: VOICE.voiceId, modelId: VOICE.modelId, outputFormat: VOICE.outputFormat, settings: VOICE.settings };
 
-  it('has no orphan clips', () => {
-    const ids = new Set(NARRATION.map((l) => l.id));
-    for (const f of fs.readdirSync(AUDIO)) {
-      if (f.endsWith('.mp3')) expect(ids.has(f.slice(0, -4)), `orphan ${f}`).toBe(true);
-    }
-    for (const id of Object.keys(manifest)) expect(ids.has(id), `orphan manifest entry ${id}`).toBe(true);
-  });
+    it('has a clip per line whose hash matches the current text and voice (else run pnpm voiceover)', () => {
+      for (const l of tour.lines) {
+        const file = path.join(AUDIO, `${l.id}.mp3`);
+        expect(fs.existsSync(file), `${tour.id}/${l.id}.mp3 missing`).toBe(true);
+        expect(fs.statSync(file).size, `${tour.id}/${l.id}.mp3 too small`).toBeGreaterThan(5_000);
+        expect(manifest[l.id]?.hash, `${tour.id}/${l.id}: narration or voice changed without regenerating`)
+          .toBe(hashLine(spokenText(l.text), voice));
+      }
+    });
 
-  it('keeps the total under 1.5 MB', () => {
-    const total = fs.readdirSync(AUDIO).filter((f) => f.endsWith('.mp3'))
-      .reduce((n, f) => n + fs.statSync(path.join(AUDIO, f)).size, 0);
-    expect(total).toBeLessThan(1.5 * 1024 * 1024);
+    it('has no orphan clips', () => {
+      const ids = new Set(tour.lines.map((l) => l.id));
+      for (const f of fs.readdirSync(AUDIO)) {
+        // A sibling tour's directory lives in here; only mp3s are ours.
+        if (f.endsWith('.mp3')) expect(ids.has(f.slice(0, -4)), `orphan ${tour.id}/${f}`).toBe(true);
+      }
+      for (const id of Object.keys(manifest)) expect(ids.has(id), `orphan manifest entry ${tour.id}/${id}`).toBe(true);
+    });
+
+    it('keeps the total under 1.5 MB', () => {
+      const total = fs.readdirSync(AUDIO).filter((f) => f.endsWith('.mp3'))
+        .reduce((n, f) => n + fs.statSync(path.join(AUDIO, f)).size, 0);
+      expect(total).toBeLessThan(1.5 * 1024 * 1024);
+    });
   });
-});
+}

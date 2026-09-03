@@ -141,61 +141,126 @@ describe('TourUI focus', () => {
 });
 
 describe('TourUI placement', () => {
-  function withSize(el: HTMLElement, w: number, hgt: number) {
-    Object.defineProperty(el, 'offsetWidth', { value: w, configurable: true });
-    Object.defineProperty(el, 'offsetHeight', { value: hgt, configurable: true });
+  function withCard(el: HTMLElement, w: number, hgt: number, left: number, top: number) {
+    Object.defineProperty(el, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left, top, width: w, height: hgt, right: left + w, bottom: top + hgt, x: left, y: top, toJSON() {} }),
+    });
   }
   function rectTarget(r: { left: number; top: number; width: number; height: number }) {
     return { ...step(), target: () => r };
   }
+  function viewport(w: number, hgt: number) {
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: hgt, configurable: true });
+  }
 
-  it('prefers below, then above, then right, then left, clamped to the viewport', () => {
+  it('docks in one place whatever is spotlit', () => {
     const { h } = handlers();
     ui = new TourUI(page, h);
     const card = ui.root.querySelector<HTMLElement>('.tour-card')!;
-    withSize(card, 300, 150);
-    Object.defineProperty(window, 'innerWidth', { value: 1000, configurable: true });
-    Object.defineProperty(window, 'innerHeight', { value: 600, configurable: true });
+    viewport(1000, 600);
 
-    ui.showStep(rectTarget({ left: 400, top: 100, width: 50, height: 20 }), 0, 3);
-    expect(card.classList.contains('side-below')).toBe(true);
-    expect(parseFloat(card.style.left)).toBeGreaterThanOrEqual(12);
-
-    ui.showStep(rectTarget({ left: 400, top: 500, width: 50, height: 20 }), 0, 3);
-    expect(card.classList.contains('side-above')).toBe(true);
-
-    // Tall target down the middle: neither below nor above fits, right does.
-    ui.showStep(rectTarget({ left: 100, top: 100, width: 50, height: 450 }), 0, 3);
-    expect(card.classList.contains('side-right')).toBe(true);
-
-    ui.showStep(rectTarget({ left: 800, top: 100, width: 50, height: 450 }), 0, 3);
-    expect(card.classList.contains('side-left')).toBe(true);
-
-    // A target at the very edge: card stays inside the margin.
-    ui.showStep(rectTarget({ left: 0, top: 0, width: 10, height: 10 }), 0, 3);
-    expect(parseFloat(card.style.left)).toBeGreaterThanOrEqual(12);
-    expect(parseFloat(card.style.top)).toBeGreaterThanOrEqual(12);
+    // Three targets as unlike each other as the script gets: the topbar, the
+    // facet sidebar, and a card in the middle of the canvas. The card is
+    // placed by CSS alone, so it must never grow an inline left/top again.
+    for (const r of [
+      { left: 400, top: 20, width: 50, height: 20 },
+      { left: 8, top: 300, width: 200, height: 26 },
+      { left: 480, top: 280, width: 60, height: 60 },
+    ]) {
+      ui.showStep(rectTarget(r), 0, 3);
+      expect(card.style.left).toBe('');
+      expect(card.style.top).toBe('');
+      expect(card.classList.contains('dock-bl')).toBe(false);
+    }
   });
 
-  it('floats bottom-centre with no spotlight when the target is missing', () => {
+  it('slides to the other corner only when the dock would cover the target', () => {
+    const { h } = handlers();
+    ui = new TourUI(page, h);
+    const card = ui.root.querySelector<HTMLElement>('.tour-card')!;
+    viewport(1000, 600);
+    withCard(card, 420, 180, 560, 400);
+
+    ui.showStep(rectTarget({ left: 400, top: 20, width: 50, height: 20 }), 0, 3);
+    expect(card.classList.contains('dock-bl')).toBe(false);
+
+    // Bottom-right, where the docked card sits: it has to get out of the way.
+    ui.showStep(rectTarget({ left: 700, top: 480, width: 120, height: 40 }), 1, 3);
+    expect(card.classList.contains('dock-bl')).toBe(true);
+    expect(parseFloat(card.style.getPropertyValue('--dock-dx'))).toBeLessThan(0);
+  });
+
+  it('keeps the step card out of the way while the welcome card is up', () => {
+    const { h } = handlers();
+    ui = new TourUI(page, h);
+    ui.showWelcome(() => {}, () => {});
+    const card = ui.root.querySelector<HTMLElement>('.tour-card:not(.tour-welcome)')!;
+    // `hidden` alone is not enough: .tour-card declares `display: flex`, which
+    // outranks the UA stylesheet, so style.css carries a .tour-card[hidden]
+    // rule. Assert the attribute here and keep that rule beside it.
+    expect(card.hidden).toBe(true);
+    expect(ui.root.querySelectorAll('.tour-welcome')).toHaveLength(1);
+  });
+
+  it('hides the spotlight and the beam when the target is missing', () => {
     const { h } = handlers();
     ui = new TourUI(page, h);
     ui.showStep({ ...step(), target: '#nope' }, 0, 3);
-    const card = ui.root.querySelector<HTMLElement>('.tour-card')!;
     const spot = ui.root.querySelector<HTMLElement>('.tour-spot')!;
-    expect(card.classList.contains('floating')).toBe(true);
+    const beam = ui.root.querySelector<SVGSVGElement>('.tour-beam')!;
     expect(spot.hidden).toBe(true);
+    expect(beam.hasAttribute('hidden')).toBe(true);
+    expect(spot.classList.contains('lit')).toBe(false);
   });
 
   it('follows a moving rect target between frames (L-10)', async () => {
     const { h } = handlers();
     ui = new TourUI(page, h);
     const spot = ui.root.querySelector<HTMLElement>('.tour-spot')!;
+    const beam = ui.root.querySelector<SVGSVGElement>('.tour-beam')!;
     const r = { left: 10, top: 10, width: 20, height: 20 };
     ui.showStep({ ...step(), target: () => r }, 0, 3);
     expect(spot.style.left).toBe('4px');
+    // jsdom measures the card as 0x0, which is the same shape as a card that
+    // has not been laid out yet: there is no lamp to draw a beam from.
+    expect(beam.hasAttribute('hidden')).toBe(true);
     r.left = 110;
     await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
     expect(spot.style.left).toBe('104px');
+  });
+
+  it('draws a finite cone that lands on the target (H-complaint 2)', () => {
+    const { h } = handlers();
+    ui = new TourUI(page, h);
+    const card = ui.root.querySelector<HTMLElement>('.tour-card')!;
+    const beam = ui.root.querySelector<SVGSVGElement>('.tour-beam')!;
+    viewport(1000, 600);
+    withCard(card, 420, 180, 560, 400);
+
+    const target = { left: 100, top: 60, width: 40, height: 20 };
+    ui.showStep(rectTarget(target), 0, 3);
+    expect(beam.hasAttribute('hidden')).toBe(false);
+
+    const points = beam.querySelector('.cone')!.getAttribute('points')!;
+    expect(points).not.toMatch(/NaN|Infinity/);
+    const pts = points.split(' ').map((q) => q.split(',').map(Number));
+    expect(pts).toHaveLength(4);
+    for (const [x, y] of pts) { expect(Number.isFinite(x)).toBe(true); expect(Number.isFinite(y)).toBe(true); }
+
+    // The far edge is the target's own silhouette, so both of its points must
+    // sit on the target rather than somewhere in the middle of the screen.
+    const pad = 24;
+    for (const [x, y] of pts.slice(1, 3)) {
+      expect(x).toBeGreaterThan(target.left - pad);
+      expect(x).toBeLessThan(target.left + target.width + pad);
+      expect(y).toBeGreaterThan(target.top - pad);
+      expect(y).toBeLessThan(target.top + target.height + pad);
+    }
+
+    // And the arrowhead points from the lamp towards the target, not away.
+    const t = beam.querySelector('.head')!.getAttribute('transform')!;
+    expect(t).toMatch(/^translate\([-\d.]+,[-\d.]+\) rotate\([-\d.]+\)$/);
   });
 });

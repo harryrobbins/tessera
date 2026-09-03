@@ -110,3 +110,75 @@ Workstreams started 2026-08-26 (lead session, subagents coordinated via `.agent-
   1M. `?preserve=0` added so the user can measure preserveDrawingBuffer on real
   hardware. 414 tests, typecheck clean, tour-e2e / detail-e2e / verify-cards /
   verify-card / verify-hidpi / verify-map all green.
+
+- 2026-09-03 (tour): a second narrated tour, and the overlay rebuilt around a
+  fixed caption. **The lamp and the beam.** User feedback was that the caption
+  card moved every step so the eye had to hunt for it, that it was never clear
+  *which* control was being talked about, and that the page was too dark. The
+  card is now docked bottom-right for the whole tour — the one corner this
+  layout never puts a spotlight target in — and what moves is the light: a glow
+  flies from the card to the step's target, the target lights up under it, and
+  an SVG cone stays behind joining the two. The cone's far edge is the target's
+  own silhouette (the two corners at the extreme angles from the lamp), so a
+  40 px select gets a needle and one card on the canvas gets a wedge, with no
+  per-target tuning; a target filling much of the screen gets a parallel shaft
+  instead, because its silhouette would swallow everything. The 60 % full-screen
+  cut-out shadow is replaced by an 18 % veil, so the topbar and the facet counts
+  stay readable — the narration quotes numbers that are on screen. `placeCard`
+  and the four `side-*` classes are gone, and with them a forced layout per rAF
+  frame: the card is measured once per step, and the dock rect is computed, not
+  read. `flyTo` now aims the camera to the right of its target by
+  `LAMP_RESERVE / 2` so a card flown to the middle of the board lands centred in
+  the space the lamp leaves; without it the birds tour's 360 px photograph
+  clipped the dock and the lamp had to move out of its own way, which is the
+  complaint all over again. The corner-flip fallback survives for a viewport
+  narrow enough to need it, and now wants 24 px of real overlap rather than a
+  12 px graze.
+  **Two latent bugs found doing it.** `hidden` is not a property on an SVG
+  element, so `beam.hidden = true` set an expando and left the beam on screen;
+  and `.tour-card`'s `display: flex` outranks the UA `[hidden]` rule, so the
+  empty step card sat in the dock behind the welcome card, controls and all
+  (invisible before only because the old card had no min-height and sat at
+  0,0). Both now carry their own `[hidden]` rule, as `.cursor-chip` and
+  `.popover` already did.
+  **The birds tour.** `TOUR_SCRIPTS` in `script.ts` (still import-free, still
+  loaded by the generator under type stripping) is now a registry of tours, each
+  with its own clip directory; `steps.ts` maps a tour id to a step builder, and
+  `actions.ts` keeps the driving as `stepHelpers` so `birdActions.ts` shares it
+  rather than copying it. `startTour({ tourId })` picks steps and audio base
+  together, and the welcome card asks which collection when no id is named. One
+  `tessera.tour.v1` key for both: it gates the first-visit auto-open, and
+  someone shown around either collection has been onboarded. Sixteen lines from
+  a world map down to one red-tailed tropicbird, on `birds:900` — the 128 px
+  sheet, so the last three steps show a photograph that holds together, and
+  every category filled in where the 2,000 bake carries an Unknown level. Every
+  figure asserted against `public/data/birds-900.json` in
+  `tests/tour-birds-story.test.ts`, including that the eleven marine migrants
+  really are two petrels, a shearwater, two eiders, five auks and a tropicbird.
+  The opening line loads the collection itself, unlike the tax tour's, because
+  it talks about birds and photographs and would otherwise play over tax cases.
+  **The narration claimed photographs the collection does not have.** A draft
+  line said "every picture is a real photograph". About half the birds-900
+  images are nineteenth-century lithographic plates — Keulemans, Wolf,
+  Naumann — because the Commons filter (public domain and CC0) is in effect a
+  date filter, which `README.md` already said and the narration had not read.
+  The lines now say "picture", the opening one names both ("a photograph, or a
+  nineteenth-century plate"), and `tour-birds-story.test.ts` holds the line:
+  the word "photograph" is allowed only where a line also owns up to the
+  plates. Worth noting the story tests as originally written could not have
+  caught this — they checked every *number* and no *claim*.
+  **Clips are one directory per tour**, `public/audio/tour/{tax,birds}/`,
+  after `tour-script.test.ts` (now generalised over `TOUR_SCRIPTS`, so both
+  tours get the hash guard and the 1.5 MB cap that only the tax tour had) grew
+  a rule that no tour's `audioBase` may nest inside another's — and caught
+  `audio/tour/birds/` sitting inside the tax tour's own directory. The sixteen
+  tax mp3s moved with `git mv`; hashes are over text and voice, not paths, so
+  nothing regenerated.
+  **Also**: `scripts/vite.e2e.config.mjs` sets `watch: null` — with HMR already
+  off there is nothing to deliver, and a second watching server on top of a
+  running `pnpm dev` exhausts this box's inotify limit, which killed the e2e
+  with ENOSPC twice before it ever answered.
+  525 tests, typecheck clean, `pnpm build` clean, `pnpm test:e2e` (4 passes)
+  and the new `pnpm test:e2e:birds` (16 steps + the picker) both green. Birds
+  audio generated with `pnpm voiceover --tour birds`; `pnpm voiceover
+  --dry-run` reports 0 pending for both tours.

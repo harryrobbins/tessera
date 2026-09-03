@@ -5,6 +5,7 @@ import type { TourStep, SpotRect } from './engine';
 import { NARRATION } from './script';
 import { COL, TOUR_DATASET, VAL } from './columns';
 import { FLIP_MS } from '../ui/detail/flip';
+import { LAMP_RESERVE } from './ui';
 
 /** What the tour may do to the app — built in main.ts, the only DOM-aware side. */
 export interface TourHost {
@@ -38,7 +39,7 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /** First match that actually takes up space on screen. */
-function visible(host: TourHost, selector: string): Element | null {
+export function visible(host: TourHost, selector: string): Element | null {
   const all = host.el('body')?.querySelectorAll(selector) ?? [];
   for (const el of all) {
     const r = el.getBoundingClientRect();
@@ -129,14 +130,16 @@ export function cardZoom(app: PivotApp, px: number): number {
 // ----------------------------------------------------------------- steps
 
 /**
- * Bind the narration to actions. Every action guards on the column it needs
- * existing in the loaded dataset, so schema drift degrades to a silent step
- * rather than a broken tour. Each step sets absolute state, so `back()`
- * re-running an earlier action is always safe. Every action receives the
- * step's abort signal and checks it before each host mutation, so Skip, Esc,
- * Back or Next mid-step stops the old action driving the app.
+ * The moves a tour makes, bound to one host.
+ *
+ * Both tours drive the same six controls in the same way and differ only in
+ * what they narrate, so the driving lives here once. Every helper that reads
+ * a column guards on it existing in the loaded dataset, so schema drift
+ * degrades to a silent step rather than a broken tour, and every helper that
+ * mutates the host checks the step's abort signal first, so Skip, Esc, Back
+ * or Next mid-step stops the old action driving the app.
  */
-export function buildSteps(host: TourHost): TourStep[] {
+export function stepHelpers(host: TourHost) {
   const has = (col: string) => Boolean(host.app.dataset?.columns[col]);
   const tween = (ms: number) => host.tweenMs?.(ms) ?? ms;
   const live = (signal: AbortSignal) => !signal.aborted;
@@ -146,34 +149,51 @@ export function buildSteps(host: TourHost): TourStep[] {
   const facetOn = (field: string, label: string) =>
     Boolean((host.el(`#facets input[data-field="${css(field)}"][data-label="${css(label)}"]`) as HTMLInputElement | null)?.checked);
   const tick = (field: string, label: string) => { if (has(field) && !facetOn(field, label)) host.toggleFacet(field, label); };
+  /**
+   * Frame card `i` at `px` wide. Not dead-centre: the caption lamp is docked
+   * down the right-hand side, so the camera aims off to the right of the card,
+   * which puts the card itself in the middle of what is left. Otherwise a wide
+   * card lands under the lamp and the lamp has to move out of its own way.
+   */
   const flyTo = async (i: number, px: number, ms: number, signal: AbortSignal) => {
     if (i < 0 || !live(signal)) return;
     const [x, y] = worldOf(host.app, i);
     const t = tween(ms);
-    host.app.camera.focus(x, y, cardZoom(host.app, px), t);
+    const zoom = cardZoom(host.app, px);
+    host.app.camera.focus(x + LAMP_RESERVE / 2 / zoom, y, zoom, t);
     await sleep(t, signal);
     await settle(host.app, 3000, signal);
   };
   /**
-   * The tour narrates one collection, so it loads it. The menu is not the
+   * A tour narrates one collection, so it loads it. The menu is not the
    * authority on what is on screen — a benchmark run swaps the collection
    * without touching the menu — so this asks the app itself, and reloads
    * whenever the answer is anything but the tour's own collection.
    */
-  const ensureDataset = async (signal: AbortSignal) => {
-    if (host.app.datasetKey !== TOUR_DATASET && live(signal)) await host.loadDataset(TOUR_DATASET);
+  const ensureDataset = async (key: string, signal: AbortSignal) => {
+    if (host.app.datasetKey !== key && live(signal)) await host.loadDataset(key);
   };
   /** Close the record modal if it is open: it makes `#app` inert. */
   const closeRecord = () => {
     host.el('#detail .close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   };
-  const toMap = async (signal: AbortSignal) => {
+  /** The equal-aspect longitude x latitude map, framed. */
+  const toMap = async (lon: string, lat: string, signal: AbortSignal) => {
     if (!live(signal)) return;
     await host.setLayout('xy');
-    if (has(COL.longitude) && live(signal)) await host.setSelect('axisX', COL.longitude);
-    if (has(COL.latitude) && live(signal)) await host.setSelect('axisY', COL.latitude);
+    if (has(lon) && live(signal)) await host.setSelect('axisX', lon);
+    if (has(lat) && live(signal)) await host.setSelect('axisY', lat);
     if (live(signal)) host.app.fit();
   };
+  return { has, tween, live, layoutBtn, facetRow, facetOn, tick, flyTo, ensureDataset, closeRecord, toMap };
+}
+
+/**
+ * Bind the tax tour's narration to actions. Each step sets absolute state, so
+ * `back()` re-running an earlier action is always safe.
+ */
+export function buildSteps(host: TourHost): TourStep[] {
+  const { has, tween, live, layoutBtn, facetRow, tick, flyTo, ensureDataset, closeRecord, toMap } = stepHelpers(host);
 
   const actions: Record<string, Pick<TourStep, 'target' | 'run' | 'minMs'>> = {
     welcome: {},
@@ -184,14 +204,14 @@ export function buildSteps(host: TourHost): TourStep[] {
         // Nothing else may be driving the app while the tour narrates it.
         host.stopBenchmark?.();
         closeRecord();
-        await ensureDataset(signal);
+        await ensureDataset(TOUR_DATASET, signal);
         if (!live(signal)) return;
         // The tour asserts a specific look; a returning viewer's saved "labels
         // off" would desynchronise it from the narration.
         host.resetCardSettings?.();
         host.clearFacets();
         if (has(COL.topic)) await host.setSelect('colorBy', COL.topic);
-        await toMap(signal);
+        await toMap(COL.longitude, COL.latitude, signal);
       },
     },
     colour: {
@@ -329,6 +349,7 @@ export function buildSteps(host: TourHost): TourStep[] {
   return NARRATION.map((line) => ({ id: line.id, title: line.title, text: line.text, ...(actions[line.id] ?? {}) }));
 }
 
-function css(s: string): string {
+/** Escape a column or category name for use inside an attribute selector. */
+export function css(s: string): string {
   return s.replace(/["\\]/g, '\\$&');
 }

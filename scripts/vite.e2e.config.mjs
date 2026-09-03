@@ -14,5 +14,6 @@ export default {
   server: {
     ...base.server,
     hmr: false,
+    watch: null,
   },
 };

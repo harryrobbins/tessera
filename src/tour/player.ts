@@ -48,7 +48,7 @@ export class AudioPlayer implements TourPlayer {
   constructor(opts: AudioPlayerOptions = {}) {
     this.create = opts.createAudio ?? (() => new Audio() as unknown as AudioLike);
     this.storage = opts.storage === undefined ? safeStorage() : opts.storage;
-    this.base = opts.base ?? 'audio/tour/';
+    this.base = opts.base ?? 'audio/tour/tax/';
     this.fastMs = opts.fastMs !== undefined ? opts.fastMs : readFast(this.storage);
     try { this._muted = this.storage?.getItem(MUTED_KEY) === '1'; } catch { /* ignore */ }
   }

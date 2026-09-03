@@ -230,7 +230,7 @@ describe('AudioPlayer', () => {
     const t0 = Date.now();
     await p.play('welcome', 'a long caption of many many words', new AbortController().signal, 5000);
     expect(Date.now() - t0).toBeLessThan(1000);
-    expect(a.src).toBe('audio/tour/welcome.mp3');
+    expect(a.src).toBe('audio/tour/tax/welcome.mp3');
   });
 
   it('falls back to a reading-pace timer when play() rejects', async () => {

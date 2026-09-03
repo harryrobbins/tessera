@@ -148,31 +148,61 @@ hover is throttled to one pick per frame and switched off above 200,000 rows.
 ## Guided tour
 
 First visit opens a welcome card offering a two-minute narrated walkthrough
-(`src/tour/`). It is a story told against the data rather than a feature
-list: three thousand tax customer-service cases on a map of the UK, coloured
-by channel; bars and a cross-tab showing that post belongs to the countryside
-and the over-seventy-fives; a scatter in which a letter takes five and a half
-days where a webchat takes half an hour; filters down to twelve open,
-high-priority cases on paper; a grid sorted by how often each customer has had
-to chase; then a flight into one person's card and their detail record. Every
-number in the narration is asserted against `tax-cases:3000` in
-`tests/tour-story.test.ts`, so a generator change fails the build before a
-visitor hears a story the picture no longer tells.
+(`src/tour/`), and asks which collection to be shown around. Each tour is a
+story told against the data rather than a feature list.
 
-The caption card sits beside whatever is spotlit, with an arrow pointing at
-it, and flips above, right or left to stay in the viewport. Keys: `→`/`Space`
-next, `←` back, `Esc` skip, `M` mute. The **Tour** button replays it;
-`?tour=1` forces it; `?bench=1` or a `?dataset=` deep link suppress it; and
-finishing or dismissing sets `localStorage['tessera.tour.v1']` so it does not
-open again.
+**Tax customer service** — three thousand customer-service cases on a map of
+the UK, coloured by channel; bars and a cross-tab showing that post belongs to
+the countryside and the over-seventy-fives; a scatter in which a letter takes
+five and a half days where a webchat takes half an hour; filters down to twelve
+open, high-priority cases on paper; a grid sorted by how often each customer
+has had to chase; then a flight into one person's card and their detail record.
 
-Steps are data-driven: `src/tour/script.ts` holds the narration (title, text
-and the ElevenLabs voice settings), `actions.ts` binds each line's id to what
-the app does, and `columns.ts` is the only place the tour knows column names
-(a test checks that every bold term in the narration is one of them).
+**Birds of the world** — nine hundred species in their own photographs, which
+makes the colour, grid and one-card steps do quite different work: a world map
+by longitude and latitude, six in ten of them forest birds, thirty orders,
+seven mass bands from a two-gram woodstar to a thirty-five-kilo cassowary, and
+the hand-wing index — a real dispersal metric, twenty-five for a sedentary
+species against forty-nine for a migratory one, over ranges eight times wider.
+Then down to forty-one seabirds, eleven ocean-crossing migrants, and one
+red-tailed tropicbird with its photographer's credit.
+
+Every number in either narration is asserted against the collection the tour
+loads — `tests/tour-story.test.ts` for the cases, `tests/tour-birds-story.test.ts`
+for the birds — so a generator change or a re-baked dataset fails the build
+before a visitor hears a story the picture no longer tells.
+
+The caption card is a lamp docked bottom-right for the whole tour, so the eye
+learns where the words are instead of chasing them around the screen. What
+moves is the light: a glow flies from the card to each step's target, the
+target lights up under it, and a cone of light stays behind joining the two —
+its far edge is the target's own silhouette, so a 40-pixel select gets a
+needle and one card on the canvas gets a wedge. The page itself is veiled at
+18%, not blacked out, because the narration talks about numbers that are on
+screen. Under `prefers-reduced-motion` the light simply arrives, with no
+journey. Keys: `→`/`Space` next, `←` back, `Esc` skip, `M` mute. The **Tour**
+button replays it; `?tour=1` forces it; `?bench=1` or a `?dataset=` deep link
+suppress it; and finishing or dismissing sets
+`localStorage['tessera.tour.v1']` so it does not open again.
+
+Steps are data-driven. `src/tour/script.ts` holds the narration and the
+`TOUR_SCRIPTS` registry — one entry per tour, with its lines, its menu label
+and its clip directory; it stays import-free because the voiceover generator
+loads it directly under Node's type stripping. `steps.ts` maps a tour id to a
+step builder; `actions.ts` keeps the driving of the app in `stepHelpers` so
+`birdActions.ts` shares it rather than copying it; and `columns.ts` is the only
+place either tour knows column names (a test checks that every bold term in a
+narration is one of them). `startTour({ tourId })` picks the steps and the clip
+directory together, so a tour can never narrate one collection in another's
+voice. Adding a tour means an entry in `TOUR_SCRIPTS`, a builder in `steps.ts`,
+and `pnpm voiceover`.
+
+Both tours share one `tessera.tour.v1` key: it gates the first-visit
+auto-open, and a visitor shown around either collection has been onboarded.
 
 **Narration audio** is pre-generated with ElevenLabs and committed under
-`public/audio/tour/` (one mp3 per line plus `manifest.json`); nothing is
+`public/audio/tour/<tour>/` — one directory per tour, one mp3 per line plus its
+own `manifest.json`, so two tours are free to use the same line id. Nothing is
 synthesised at runtime or in CI. When a clip is missing, blocked by autoplay
 policy, or muted, the step stays up for a reading-pace timer instead, so the
 tour works without audio. To (re)generate:
@@ -182,14 +212,15 @@ tour works without audio. To (re)generate:
 pnpm voiceover --add-voice     # once: adds the library voice to the workspace
 pnpm voiceover --dry-run       # shows the characters that would be billed
 pnpm voiceover                 # only lines whose text/voice hash changed regenerate
+pnpm voiceover --tour birds    # one tour; without it every tour is brought up to date
 ```
 
 The voice is Isla Skye (`TVmbglAk3F1GkiCoOq47`), a shared library voice, so it
 has to be in the workspace before it can be used. `--add-voice` does that if the
 key has the `add_voice_from_voice_library` permission; otherwise add it in the
-ElevenLabs UI (Voice Library → Isla Skye → Add to my voices) first. Once the
+ElevenLabs UI (Voice Library → Isla Skye → Add to my voices) first. Once a
 manifest exists, `tests/tour-script.test.ts` fails whenever a line is edited
-without its clip being regenerated, and caps the total at 1.5 MB.
+without its clip being regenerated, and caps each tour's total at 1.5 MB.
 
 ## Data
 
@@ -435,7 +466,8 @@ Each boots its own vite on its own port, drives the bundled Chromium, and
 kills the server on exit; screenshots land in `screenshots/`. Add
 `--swiftshader` for a reproducible CPU-only run.
 
-- `pnpm test:e2e` (`scripts/tour-e2e.mjs`, port 5182) — walks every tour step with the audio stubbed, asserting caption, spotlight placement and app state.
+- `pnpm test:e2e` (`scripts/tour-e2e.mjs`, port 5182) — walks every step of the tax tour with the audio stubbed, asserting caption, spotlight, beam and app state, plus gating, auto-advance and the benchmark hand-off.
+- `pnpm test:e2e:birds` (`scripts/tour-birds-e2e.mjs`, port 5183) — picks the birds tour on the welcome card and walks its sixteen steps; it drives a different schema and its own clip directory.
 - `node scripts/detail-e2e.mjs` (port 5195) — the record modal is a dialog that makes the app inert, expands out of the card it came from (and does not move at all under `prefers-reduced-motion`), and whose demo action links never navigate.
 - `node scripts/verify-hidpi.mjs` (port 5191) — the hi-res tier engages at DPR 2 and 1, and edges are measurably sharper than with `?hires=0`.
 - `node scripts/verify-card.mjs` (port 5196) — screenshots the flagship customer card zoomed and in a grid, and asserts that two same-topic neighbours on a 20,000-row collection are different records pixel for pixel.

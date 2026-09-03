@@ -66,6 +66,98 @@ export const NARRATION: NarrationLine[] = [
     text: 'That\'s the tour: from a map of a country to one person\'s case. Replay it any time from the Tour button, then choose a collection of your own.' },
 ];
 
+/**
+ * The birds tour. A second collection, a second story: the tax cases are a map
+ * of one country in flat colour, and this is nine hundred pictures of real
+ * animals, so the steps that show colour, the grid and one card up close are
+ * doing quite different work here.
+ *
+ * The pictures are Commons images filtered to public domain and CC0, which is
+ * in effect a date filter: about half are nineteenth-century lithographic
+ * plates rather than photographs. So the narration says "picture", never
+ * "photograph" — tests/tour-birds-story.test.ts holds that line. Same rules as above — bold **terms** must
+ * name a column or a category value in columns.ts, and every number is checked
+ * against `public/data/birds-900.json` by tests/tour-birds-story.test.ts.
+ */
+export const BIRDS_NARRATION: NarrationLine[] = [
+  { id: 'open', title: 'Welcome',
+    text: 'Welcome to Tessera. Every tile is one bird, and every picture is that bird — a photograph, or a nineteenth-century plate. Nothing is ever redrawn; the tiles simply fly.' },
+  { id: 'world', title: 'A world of birds',
+    text: 'Nine hundred species, plotted by **Longitude** and **Latitude**. Every light is one bird, in the average colour of its own picture, and half live south of the equator.' },
+  { id: 'habitat', title: 'Where they live',
+    text: 'Colour by **Habitat**, and the forest takes over: six of every ten are **Forest** birds, while only forty-one — the **Marine** ones — live out on the open sea.' },
+  { id: 'orders', title: 'Thirty orders',
+    text: 'Bars stack the same cards by **Order**. There are thirty of them, and one card in four is a **Passeriformes** — a perching bird.' },
+  { id: 'bands', title: 'Two grams to thirty-five kilos',
+    text: 'Bucket by **Mass band**: seven rungs, from under ten grams to over two kilos. The lightest here is a two-gram woodstar, the heaviest a thirty-five-kilo cassowary.' },
+  { id: 'diet', title: 'What they eat',
+    text: 'Cross-tab **Diet** against **Mass band**. Every **Nectar** feeder is tiny — five grams is typical — while the birds that take **Vertebrates** weigh a hundred times more.' },
+  { id: 'dispersal', title: 'The shape of a wing',
+    text: '**Hand-wing index** measures how far a wing can carry a bird. A **Sedentary** species scores twenty-five; a **Migratory** one, forty-nine, over a range eight times wider.' },
+  { id: 'wall', title: 'Nine hundred pictures',
+    text: 'Back to the grid, sorted and coloured by **Hand-wing index**: short round wings at one end, and at the other the birds that cross oceans.' },
+  { id: 'ocean', title: 'Out to sea',
+    text: 'Tick **Marine** under **Habitat**. Forty-one seabirds are left, and their typical **Hand-wing index** is sixty — the highest of any habitat here.' },
+  { id: 'voyagers', title: 'The eleven',
+    text: 'Filters combine. Add **Migratory** under **Migration** and eleven birds remain: two petrels and a shearwater, two eiders, five auks, and one tropicbird.' },
+  { id: 'closer', title: 'Closer',
+    text: 'Zoom with the wheel, or the plus and minus buttons, and drag to pan. Up close each card shows the bird, its species, and what it weighs.' },
+  { id: 'one-bird', title: 'One bird',
+    text: 'Click the card at the far end. A red-tailed tropicbird: **Marine**, **Migratory**, hunting **Aquatic prey**, with a **Hand-wing index** of sixty-nine — the highest of the eleven.' },
+  { id: 'credit', title: 'The whole bird',
+    text: 'The detail view opens the full picture, with the taxonomy, the measurements, the range — and the **Photographer** and licence that let us show it.' },
+  { id: 'nothing-lost', title: 'Nothing lost',
+    text: 'Clear the filters, and all nine hundred birds return to their places. Filters never destroy anything; they only choose what you are looking at.' },
+  { id: 'frame', title: 'The whole world again',
+    text: 'Press F, or the Fit button, and the whole world of birds is back in frame.' },
+  { id: 'your-turn', title: 'Your turn',
+    text: 'That is the tour: nine hundred birds, and one tropicbird at the end of it. Replay it any time from the Tour button, then choose a collection of your own.' },
+];
+
+/**
+ * One narrated tour: its lines and the directory its clips live in.
+ *
+ * Audio bases must differ, because ids may not: two tours are free to both
+ * have a `welcome`, and the generator writes `<audioBase><id>.mp3` under each
+ * one's own manifest. Adding a tour here is all it takes for the generator to
+ * voice it and for `startTour({ tourId })` to play it.
+ */
+export interface TourScript {
+  id: string;
+  /** Menu label; the collection, not the tour. */
+  label: string;
+  /** One line on what the tour shows, for whatever offers the choice. */
+  blurb: string;
+  /** Clip directory, relative so it resolves under a sub-path deploy. */
+  audioBase: string;
+  lines: NarrationLine[];
+}
+
+export const TOUR_SCRIPTS: TourScript[] = [
+  {
+    id: 'tax',
+    label: 'Tax customer service',
+    blurb: 'Three thousand customer-service cases, from a map of the country down to one person waiting.',
+    audioBase: 'audio/tour/tax/',
+    lines: NARRATION,
+  },
+  {
+    id: 'birds',
+    label: 'Birds of the world',
+    blurb: 'Nine hundred species, each with its own portrait, from a world map down to one ocean-crossing tropicbird.',
+    audioBase: 'audio/tour/birds/',
+    lines: BIRDS_NARRATION,
+  },
+];
+
+/** The tour that opens when none is named: the onboarding collection's own. */
+export const DEFAULT_TOUR_ID = 'tax';
+
+/** The named tour, or the default one — an unknown id is never fatal. */
+export function tourScript(id: string = DEFAULT_TOUR_ID): TourScript {
+  return TOUR_SCRIPTS.find((t) => t.id === id) ?? TOUR_SCRIPTS[0];
+}
+
 /** Text as spoken: the caption markup stripped. */
 export function spokenText(text: string): string {
   return text.replace(/\*\*/g, '');

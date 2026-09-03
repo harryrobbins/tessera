@@ -33,7 +33,7 @@ await ctx.addInitScript(() => {
   localStorage.setItem('tessera.tour.muted', '1');
   localStorage.removeItem('tessera.tour.v1');
 });
-await ctx.route('**/audio/tour/*.mp3', (r) => r.fulfill({ status: 404, body: 'stub' }));
+await ctx.route('**/audio/tour/**/*.mp3', (r) => r.fulfill({ status: 404, body: 'stub' }));
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
