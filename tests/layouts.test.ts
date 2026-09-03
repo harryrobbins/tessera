@@ -253,14 +253,19 @@ describe('barsLayout', () => {
       expect(result.positions[14 * 4 + 1]).toBeCloseTo(ey, 6);
     }
 
-    expect(result.bounds).toEqual({ minX: x0, maxX: x0 + totalW, minY: y0, maxY: y0 + maxRows * CARD_PITCH });
+    expect(result.bounds).toEqual({
+      minX: x0 - CARD_PITCH / 2,
+      maxX: x0 + totalW - CARD_PITCH / 2,
+      minY: y0 - CARD_PITCH / 2,
+      maxY: y0 + (maxRows - 0.5) * CARD_PITCH,
+    });
 
     expect(result.xAxis).toBeDefined();
     const ticks = result.xAxis!.ticks;
     expect(ticks.length).toBe(3);
-    expect(ticks[0]).toEqual({ pos: x0 + 0 * stride + (barCols * CARD_PITCH) / 2, label: 'a', count: 10 });
-    expect(ticks[1]).toEqual({ pos: x0 + 1 * stride + (barCols * CARD_PITCH) / 2, label: 'b', count: 4 });
-    expect(ticks[2]).toEqual({ pos: x0 + 2 * stride + (barCols * CARD_PITCH) / 2, label: 'c', count: 1 });
+    expect(ticks[0]).toEqual({ pos: x0 + 0 * stride + ((barCols - 1) * CARD_PITCH) / 2, label: 'a', count: 10 });
+    expect(ticks[1]).toEqual({ pos: x0 + 1 * stride + ((barCols - 1) * CARD_PITCH) / 2, label: 'b', count: 4 });
+    expect(ticks[2]).toEqual({ pos: x0 + 2 * stride + ((barCols - 1) * CARD_PITCH) / 2, label: 'c', count: 1 });
 
     // Groups occupy disjoint x-ranges: nowhere-else invariant.
     const groupXs = [new Set<number>(), new Set<number>(), new Set<number>()];
@@ -395,14 +400,19 @@ describe('scatterLayout', () => {
       expect(result.positions[7 * 4 + 1]).toBeCloseTo(ey, 6);
     }
 
-    expect(result.bounds).toEqual({ minX: x0, maxX: x0 + totalW, minY: y0, maxY: y0 + totalH });
+    expect(result.bounds).toEqual({
+      minX: x0 - CARD_PITCH / 2,
+      maxX: x0 + totalW - CARD_PITCH / 2,
+      minY: y0 - CARD_PITCH / 2,
+      maxY: y0 + totalH - CARD_PITCH / 2,
+    });
 
     const xTicks = result.xAxis!.ticks;
     const yTicks = result.yAxis!.ticks;
     expect(xTicks.map((t) => t.label)).toEqual(['x0', 'x1']);
     expect(yTicks.map((t) => t.label)).toEqual(['y0', 'y1']);
-    expect(xTicks[0].pos).toBeCloseTo(x0 + 0 * stride + (cellCards * CARD_PITCH) / 2, 6);
-    expect(xTicks[1].pos).toBeCloseTo(x0 + 1 * stride + (cellCards * CARD_PITCH) / 2, 6);
+    expect(xTicks[0].pos).toBeCloseTo(x0 + 0 * stride + ((cellCards - 1) * CARD_PITCH) / 2, 6);
+    expect(xTicks[1].pos).toBeCloseTo(x0 + 1 * stride + ((cellCards - 1) * CARD_PITCH) / 2, 6);
   });
 
   it('encloses every card within bounds, keeps cards inside their own cell, and tick counts match bin counts', () => {

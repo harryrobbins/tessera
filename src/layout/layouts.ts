@@ -317,7 +317,17 @@ export function gridLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: '
     visible: count,
     pitch: CARD_PITCH,
     cardSize: CARD_SIZE,
-    bounds: { minX: x0, maxX: x0 + cols * CARD_PITCH, minY: y0 - rows * CARD_PITCH, maxY: y0 },
+    // A card is drawn centred on its position, so the frame reaches half a
+    // pitch beyond the outer centres. Anchored at the centres it sat half a
+    // cell right and down of the cards, and fit() parked the camera there —
+    // imperceptible across a full board, a clear top-left shove once a
+    // filter leaves a handful of cards.
+    bounds: {
+      minX: x0 - CARD_PITCH / 2,
+      maxX: x0 + (cols - 0.5) * CARD_PITCH,
+      minY: y0 - (rows - 0.5) * CARD_PITCH,
+      maxY: y0 + CARD_PITCH / 2,
+    },
   };
 }
 
@@ -363,7 +373,7 @@ export function barsLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: '
 
   const ticks: AxisTick[] = [];
   for (let g = 0; g < nGroups; g++) {
-    ticks.push({ pos: x0 + g * stride + (barCols * CARD_PITCH) / 2, label: labels[g], count: counts[g] });
+    ticks.push({ pos: x0 + g * stride + ((barCols - 1) * CARD_PITCH) / 2, label: labels[g], count: counts[g] });
   }
   // Frame the bars that have cards. A filter down to one of four channels
   // leaves three empty, unlabelled bucket-widths in the bounds, and a fit then
@@ -380,10 +390,10 @@ export function barsLayout(data: LayoutData, spec: Extract<LayoutSpec, { type: '
     pitch: CARD_PITCH,
     cardSize: CARD_SIZE,
     bounds: {
-      minX: x0 + firstG * stride,
-      maxX: x0 + lastG * stride + barCols * CARD_PITCH,
-      minY: y0,
-      maxY: y0 + maxRows * CARD_PITCH,
+      minX: x0 + firstG * stride - CARD_PITCH / 2,
+      maxX: x0 + lastG * stride + (barCols - 0.5) * CARD_PITCH,
+      minY: y0 - CARD_PITCH / 2,
+      maxY: y0 + (maxRows - 0.5) * CARD_PITCH,
     },
     xAxis: { title: spec.by, ticks },
   };
@@ -439,16 +449,21 @@ export function scatterLayout(data: LayoutData, spec: Extract<LayoutSpec, { type
   }
 
   const xTicks: AxisTick[] = [];
-  for (let c = 0; c < nx; c++) xTicks.push({ pos: x0 + c * stride + (cellCards * CARD_PITCH) / 2, label: xb.labels[c] });
+  for (let c = 0; c < nx; c++) xTicks.push({ pos: x0 + c * stride + ((cellCards - 1) * CARD_PITCH) / 2, label: xb.labels[c] });
   const yTicks: AxisTick[] = [];
-  for (let r = 0; r < ny; r++) yTicks.push({ pos: y0 + r * stride + (cellCards * CARD_PITCH) / 2, label: yb.labels[r] });
+  for (let r = 0; r < ny; r++) yTicks.push({ pos: y0 + r * stride + ((cellCards - 1) * CARD_PITCH) / 2, label: yb.labels[r] });
 
   return {
     positions,
     visible: order.length,
     pitch: CARD_PITCH,
     cardSize: CARD_SIZE,
-    bounds: { minX: x0, maxX: x0 + totalW, minY: y0, maxY: y0 + totalH },
+    bounds: {
+      minX: x0 - CARD_PITCH / 2,
+      maxX: x0 + totalW - CARD_PITCH / 2,
+      minY: y0 - CARD_PITCH / 2,
+      maxY: y0 + totalH - CARD_PITCH / 2,
+    },
     xAxis: { title: spec.x, ticks: xTicks },
     yAxis: { title: spec.y, ticks: yTicks },
   };

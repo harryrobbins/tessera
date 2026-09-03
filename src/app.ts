@@ -723,15 +723,18 @@ export class PivotApp {
   }
 
   async setMask(mask: Uint8Array | null) {
+    const prev = this.bounds;
     this.mask = mask;
-    await this.setLayout(this.spec);
+    if (!(await this.setLayout(this.spec))) return; // a newer solve owns the refit
     // A filter re-solves the layout, and every layout is sized by what it has
     // to place: 3,000 cards make a board sixteen times wider than 12 do. The
-    // camera stays where it was, so without this a filter can leave the
-    // viewport on empty space and read as "my filter deleted the data".
-    // Only when there is nothing left to look at from here — panning and
-    // zooming a filtered board the viewer can still see is theirs to do.
-    if (this.layoutOffView()) this.fit();
+    // camera stays where it was, so a mask change can strand it in either
+    // direction: narrowing can leave the viewport on empty space ("my filter
+    // deleted the data"), and broadening can bury it inside a board that grew
+    // far past the frame ("removing my filter did nothing"). Reframe in those
+    // two cases only — panning and zooming a filtered board the viewer can
+    // still see is theirs to do.
+    if (this.layoutOffView() || this.layoutOutgrewView(prev)) this.fit();
   }
 
   /** How small the whole layout may get on screen before a filter has, in
@@ -750,6 +753,24 @@ export class PivotApp {
     if (b.maxX < cam.x - halfW || b.minX > cam.x + halfW) return true;
     if (b.maxY < cam.y - halfH || b.minY > cam.y + halfH) return true;
     return w / (halfW * 2) < PivotApp.SPECK && h / (halfH * 2) < PivotApp.SPECK;
+  }
+
+  /** The mirror of layoutOffView, for a mask change that *grew* the board:
+   *  true when the viewport is left framing under SPECK of it in both axes.
+   *  Gated on actual growth so the map and the raw scatter — whose bounds are
+   *  a function of the columns, never the mask — keep their promise that a
+   *  filter tick does not move the camera. */
+  private layoutOutgrewView(prev: Bounds): boolean {
+    const b = this.bounds;
+    const w = b.maxX - b.minX;
+    const h = b.maxY - b.minY;
+    if (!(w > 0) || !(h > 0)) return false;
+    const grew = w > prev.maxX - prev.minX + 1e-6 || h > prev.maxY - prev.minY + 1e-6;
+    if (!grew) return false;
+    const cam = this.camera.target;
+    const viewW = this.canvas.width / cam.zoom;
+    const viewH = this.canvas.height / cam.zoom;
+    return viewW / w < PivotApp.SPECK && viewH / h < PivotApp.SPECK;
   }
 
   /** True for an equal-aspect longitude x latitude scatter — the night-lights map. */
