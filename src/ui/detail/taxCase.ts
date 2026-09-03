@@ -58,6 +58,11 @@ export const taxCaseDetail: DetailRenderer = (ds, i, ctx) => {
   const contacts = num(ds, 'Contacts', i);
   const hours = num(ds, 'Resolution hours', i);
   const sat = num(ds, 'Satisfaction', i);
+  const waiting = num(ds, 'Days waiting', i);
+  const handling = num(ds, 'Handling minutes', i);
+  const prior = num(ds, 'Prior cases', i);
+  const slaState = valueAt(ds, 'Within SLA', i);
+  const reopened = valueAt(ds, 'Reopened', i) === 'Yes';
 
   const field = (label: string, html: string) =>
     `<div class="fld"><dt>${esc(label)}</dt><dd>${html || '—'}</dd></div>`;
@@ -66,7 +71,7 @@ export const taxCaseDetail: DetailRenderer = (ds, i, ctx) => {
     ? `${contacts.toFixed(0)} contact${contacts === 1 ? '' : 's'}`
     : 'Contacts';
   const resolvedLabel = open
-    ? `<b>Still open</b><small>${escalated ? 'escalated' : 'in progress'}</small>`
+    ? `<b>Still open</b><small>${Number.isFinite(waiting) ? `waiting ${waiting.toFixed(0)} day${waiting === 1 ? '' : 's'}` : escalated ? 'escalated' : 'in progress'}</small>`
     : `<b>Resolved</b><small>${esc(hoursLabel(hours) || valueAt(ds, 'Resolution hours', i))}</small>`;
 
   const satisfaction = open
@@ -85,28 +90,44 @@ export const taxCaseDetail: DetailRenderer = (ds, i, ctx) => {
         ${field('Region', v('Region'))}
         ${field('Area type', v('Area type'))}
         ${field('Age band', v('Age band'))}
+        ${field('Customer type', v('Customer type'))}
+        ${field('Language', v('Language'))}
+        ${field('Support needs', v('Support needs'))}
+        ${field('Earlier cases', Number.isFinite(prior) && prior > 0
+          ? `${prior.toFixed(0)} before this one`
+          : '<span class="muted">first contact</span>')}
       </dl>
     </section>
     <section>
       <h3>Case <span class="mono ref">${esc(caseRef)}</span></h3>
       <dl class="kv">
+        ${field('Subject', v('Subject'))}
         ${field('Topic', v('Topic'))}
+        ${field('Reason', v('Reason'))}
         ${field('Team', v('Team'))}
+        ${field('Adviser', v('Adviser'))}
         ${field('Channel', `<span class="with-glyph">${glyph(channel)}${esc(channel)}</span>`)}
         ${field('Priority', `<span class="chip" style="--chip:${CHIP[priority] ?? '#86857c'}">${esc(priority)}</span>`)}
         ${field('Status', `<span class="status"><i style="background:${open ? STATUS_OPEN : STATUS_RESOLVED}"></i>${esc(status)}</span>`)}
         ${field('Escalated', escalated ? `<span class="chip" style="--chip:${STATUS_OPEN}">Yes</span>` : 'No')}
+        ${field('Reopened', reopened ? `<span class="chip" style="--chip:${STATUS_OPEN}">Yes</span>` : 'No')}
       </dl>
     </section>
     <section>
       <h3>Journey</h3>
       <ol class="timeline${open ? ' open' : ''}">
-        <li class="node start"><i></i><b>Opened</b><small>${v('Opened')}</small></li>
+        <li class="node start"><i></i><b>Opened</b><small>${esc([v('Opened'), v('Hour opened')].filter(Boolean).join(' · '))}</small></li>
         <li class="node mid"><i></i><b>${esc(contactsLabel)}</b><small>${esc(channel)}</small></li>
         <li class="node end"><i></i>${resolvedLabel}</li>
       </ol>
-      <dl class="kv one">
+      <dl class="kv">
         ${field('Satisfaction', satisfaction)}
+        ${field('Against target', slaState
+          ? `<span class="status"><i style="background:${slaState === 'Missed' ? STATUS_OPEN : slaState === 'Met' ? STATUS_RESOLVED : '#86857c'}"></i>${esc(slaState)}</span>`
+          : '')}
+        ${field('Handling time', Number.isFinite(handling)
+          ? `${handling.toFixed(0)} min<small class="muted"> of adviser time</small>`
+          : '')}
       </dl>
     </section>
     ${contextBlock(ds, i, ctx, contextFields(ds))}

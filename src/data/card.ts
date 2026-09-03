@@ -38,7 +38,7 @@ export type MarkSpec = 'initials' | { glyph: SlotRef };
 /** Hand-painted designs registered in src/gl/cards/index.ts. Extend the union
  *  and register a factory to add one — there is deliberately no way for a
  *  dataset to pass a painter function, because datasets must stay cloneable. */
-export type CustomCard = 'taxCase';
+export type CustomCard = 'taxCase' | 'photo';
 
 export interface CardTemplate {
   /** Eyebrow in the accent header. Default: the current colour-by value. */
@@ -102,9 +102,35 @@ export interface DetailAction {
   primary?: boolean;
 }
 
+/**
+ * A picture for the expanded record — one image, with the credit that has to
+ * travel with it.
+ *
+ * A bare `SlotRef` would have covered the URL and nothing else, and a record
+ * picture is never just a URL: it needs alt text and, when it is somebody
+ * else's photograph, a visible credit. Both are per-row, so both are `SlotRef`s
+ * — the same shape `TagSpec` and `MetricSpec` already use for the card.
+ *
+ * The modal never waits for it: the record's text renders immediately, the box
+ * holds its size so nothing reflows when the image lands, and an image that
+ * never lands (offline, 404, blocked) hides itself rather than leaving a
+ * broken-image icon or a hole. A dataset declaring this must still be complete
+ * without it.
+ */
+export interface DetailImage {
+  /** The image URL for a row. '' (or a missing column) draws nothing at all. */
+  src: SlotRef;
+  /** Alt text. Default: the record's title, as the card prints it. */
+  alt?: SlotRef;
+  /** A credit line under the picture — photographer, licence, source. */
+  credit?: SlotRef;
+}
+
 export interface DetailTemplate {
   /** Under the title in the modal header. Default: the card's `blurb`. */
   subtitle?: SlotRef;
+  /** A picture at the top of the body. Default: none. */
+  image?: DetailImage;
   sections?: readonly DetailSection[];
   /** Categorical facets whose share of the filtered set is shown in Context.
    *  Default: the first three categorical facets. `[]` hides the section. */

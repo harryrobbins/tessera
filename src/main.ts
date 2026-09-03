@@ -5,6 +5,7 @@ import { AxisOverlay } from './ui/axes';
 import { FacetPanel } from './ui/facets';
 import { DetailPane, registerDetail } from './ui/detail';
 import { CardSettingsPanel, loadSettings, type CardSettings } from './ui/settings';
+import { decodeView, encodeView, serialiseQuery, type ViewState } from './ui/deepLink';
 import { customCardFor } from './gl/cards';
 import { cardTextOf, compileCard, type CardModel } from './gl/cards/model';
 import { taxCaseDetail } from './ui/detail/taxCase';
@@ -192,6 +193,95 @@ function renderLegend() {
       : '');
 }
 
+// ---------------------------------------------------------------- deep link
+
+/**
+ * The view the collection opened on, captured once `load()` has filled the
+ * menus. Everything in the URL is a difference from this, so the link for a
+ * collection's default view stays `?dataset=birds:900` rather than sprouting
+ * six params that say "as you were".
+ */
+let openView: ViewState = {};
+/** Nothing is written to the URL until boot has restored whatever was in it. */
+let urlLive = false;
+let urlTimer = 0;
+
+const hasOption = (sel: HTMLSelectElement, value: string) =>
+  Array.from(sel.options).some((o) => o.value === value);
+
+/** What differs from the opening view — and only what the current layout uses. */
+function currentView(): ViewState {
+  const view: ViewState = {};
+  if (layoutKind !== openView.layout) view.layout = layoutKind;
+  if (colorSel.value && colorSel.value !== openView.color) view.color = colorSel.value;
+  // Sort follows colour on its own (see the colorBy handler), so it is only
+  // worth a param when it differs from what this colour would pick anyway.
+  // '' is the real "none" choice, and has to survive the round trip.
+  if (layoutKind !== 'xy' && sortSel.value !== (app.defaultSort() ?? '')) view.sort = sortSel.value;
+  if (layoutKind === 'bars' && barSel.value && barSel.value !== openView.bucket) view.bucket = barSel.value;
+  if (layoutKind === 'scatter' || layoutKind === 'xy') {
+    // The axis menus are refilled per layout kind, so the opening values only
+    // describe a default for the kind the collection opened on.
+    const sameKind = layoutKind === openView.layout;
+    if (xSel.value && (!sameKind || xSel.value !== openView.x)) view.x = xSel.value;
+    if (ySel.value && (!sameKind || ySel.value !== openView.y)) view.y = ySel.value;
+  }
+  const filters = facets.filterLabels();
+  if (filters.length) view.filters = filters;
+  return view;
+}
+
+function writeUrl() {
+  urlTimer = 0;
+  if (!app.dataset || !urlLive) return;
+  if (loadedKey) params.set('dataset', loadedKey);
+  // Mutated, never rebuilt: ?hires=, ?glow=, ?cards=, ?bench=, ?preserve= and
+  // the tour's params are read by other modules and must survive a facet tick.
+  encodeView(params, currentView());
+  const q = serialiseQuery(params);
+  // replaceState, not push: ticking six facets is one view, not six pages back.
+  history.replaceState(history.state, '', `${location.pathname}${q ? `?${q}` : ''}${location.hash}`);
+}
+
+/** Coalesce a drag across a column of checkboxes into a single URL write. */
+function syncUrl() {
+  if (!urlLive) return;
+  window.clearTimeout(urlTimer);
+  urlTimer = window.setTimeout(writeUrl, 150);
+}
+
+/**
+ * Put a linked view onto the collection now loaded. Order matters: the layout
+ * kind first (it refills the axis menus), then colour (it moves the sort with
+ * it), then the rest, then the filters — and one solve at the end.
+ *
+ * Anything that does not resolve against this collection is skipped, so a
+ * hand-edited or stale link degrades to the default view rather than to an
+ * error.
+ */
+async function applyView(v: ViewState) {
+  if (v.layout && v.layout !== layoutKind) setLayoutKind(v.layout);
+  if (v.color && hasOption(colorSel, v.color)) {
+    colorSel.value = v.color;
+    app.setColorBy(v.color);
+    facets.colorBy = v.color;
+    facets.render();
+    renderLegend();
+    sortSel.value = app.defaultSort() ?? '';
+  }
+  if (v.sort !== undefined && hasOption(sortSel, v.sort)) { sortSel.value = v.sort; sortPinned = true; }
+  if (v.bucket && hasOption(barSel, v.bucket)) barSel.value = v.bucket;
+  if (v.x && hasOption(xSel, v.x)) xSel.value = v.x;
+  if (v.y && hasOption(ySel, v.y)) ySel.value = v.y;
+  if (v.filters?.length) {
+    facets.setFilterLabels(v.filters);
+    // Onto the field rather than through setMask(), so the filter and the rest
+    // of the view land in one solve instead of two.
+    app.mask = facets.mask();
+  }
+  await apply(true);
+}
+
 // ------------------------------------------------------------------- wiring
 
 /**
@@ -312,6 +402,7 @@ app.onFrame = (stats, model) => {
 };
 
 facets.onChange = () => {
+  syncUrl();
   // Same failure path as apply(): a worker that rejects the re-solve (D-04)
   // becomes a toast, not an unhandled rejection.
   app.setMask(facets.mask()).catch((err: unknown) => {
@@ -323,6 +414,7 @@ $('layoutSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
   setLayoutKind(btn.dataset.layout as LayoutSpec['type']);
+  syncUrl();
   void apply(true);
 });
 // Tabs move with the arrow keys, Home and End; Tab leaves the group (roving tabindex).
@@ -340,13 +432,14 @@ $('layoutSeg').addEventListener('keydown', (e) => {
   tabs[next].click();
 });
 
-sortSel.addEventListener('change', () => { sortPinned = true; void apply(true); });
-for (const sel of [barSel, xSel, ySel]) sel.addEventListener('change', () => void apply(true));
+sortSel.addEventListener('change', () => { sortPinned = true; syncUrl(); void apply(true); });
+for (const sel of [barSel, xSel, ySel]) sel.addEventListener('change', () => { syncUrl(); void apply(true); });
 colorSel.addEventListener('change', () => {
   app.setColorBy(colorSel.value);
   facets.colorBy = colorSel.value;
   facets.render();
   renderLegend();
+  syncUrl();
   // Cards grouped by their own colour read as a chart; ungrouped they read as
   // confetti. Only stop following once the user has chosen a sort deliberately.
   if (!sortPinned) {
@@ -365,7 +458,9 @@ function setMetrics(on: boolean) {
   try { localStorage.setItem(METRICS_KEY, on ? '1' : '0'); } catch { /* private mode */ }
 }
 let metricsOn = (() => {
-  try { return localStorage.getItem(METRICS_KEY) !== '0'; } catch { return true; }
+  // Absent means off: the FPS panel is a developer's tool, and a first-time
+  // visitor should get the collection, not a readout over the top of it.
+  try { return localStorage.getItem(METRICS_KEY) === '1'; } catch { return false; }
 })();
 setMetrics(metricsOn);
 $('metricsBtn').addEventListener('click', () => setMetrics((metricsOn = !metricsOn)));
@@ -485,7 +580,18 @@ async function load(key: string) {
     } else {
       setLayoutKind('grid');
     }
+    // The baseline the URL is a diff against, taken once the menus are the new
+    // collection's (onDataset) and the opening layout is set.
+    openView = {
+      layout: layoutKind,
+      color: colorSel.value,
+      sort: sortSel.value,
+      bucket: barSel.value,
+      x: xSel.value,
+      y: ySel.value,
+    };
     loadedKey = key;
+    syncUrl();
     toast(`${app.dataset!.n.toLocaleString()} cards ready in ${(performance.now() - t0).toFixed(0)} ms`, 2000);
   } catch (err) {
     if (seq === loadSeq && prev) datasetSel.value = prev;
@@ -591,13 +697,23 @@ declare global {
 
 async function boot() {
   try {
+    // The link's view, read before the load so a failed decode cannot leave
+    // half a view applied; the collection is loaded on its own defaults first
+    // and the linked view goes on top, because onDataset() and load() would
+    // otherwise overwrite it.
+    const view = benchMode ? {} : decodeView(params);
+    const linked = Object.keys(view).length > 0;
     await load(benchMode ? 'tax-cases:900' : (params.get('dataset') ?? DEFAULT_DATASET_KEY));
+    if (linked) await applyView(view);
+    urlLive = true;
     app.start();
     window.pivot = app;
     window.runPivotBench = (opts) =>
       runBench(app, { sizes: opts?.sizes ?? [1000, 10_000, 100_000, 500_000, 1_000_000] });
     window.pivotBenchReady = true;
-    if (!benchMode && shouldAutoStart(params)) startTour(tourHost);
+    // A link that names a view is a request to look at that view, not an
+    // invitation to be shown around the app on top of it.
+    if (!benchMode && !linked && shouldAutoStart(params)) startTour(tourHost);
   } catch (err) {
     toast(String(err), 20_000);
     throw err;

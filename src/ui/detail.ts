@@ -3,7 +3,7 @@ import { valueAt } from '../data/columnar';
 import { colorOfRow } from '../core/palette';
 import { esc } from '../core/esc';
 import { expandFrom, FLIP_MS, type Rect } from './detail/flip';
-import { shareCounter, templateDetail } from './detail/template';
+import { shareCounter, templateDetail, wireDetailImage } from './detail/template';
 
 export interface DetailContext {
   /** Colour of the selected card under the current colour-by. */
@@ -100,6 +100,9 @@ export class DetailPane {
     this.el.innerHTML =
       render(ds, i, { accent: colorOfRow(ds, colorBy, i), colorBy, esc, ...this.shares(ds) }) +
       '<button class="close" aria-label="Close">×</button>';
+    // A declared picture is an enhancement, never a dependency: this hides it
+    // again if it does not load, so the pane is the same with or without it.
+    wireDetailImage(this.el);
     this.el.hidden = false;
     if (this.opts.scrim) this.opts.scrim.hidden = false;
     this.opts.background?.setAttribute('inert', '');

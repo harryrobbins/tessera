@@ -7,3 +7,5 @@ screenshots/
 .env.*
 .idea/
 .claude/settings.local.json
+scratch/
+pipeline/.cache/

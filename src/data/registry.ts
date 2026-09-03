@@ -1,9 +1,11 @@
 import type { Dataset } from './columnar';
 import { generateProducts, PRODUCT_SIZES } from './products';
-import { generateTaxCases, TAX_CASE_SIZES } from './taxCases';
+import { generateTaxCases, TAX_CASE_SIZES, TAX_CASE_SEED } from './taxCases';
 import { generateTaxReturns, TAX_RETURN_SIZES } from './taxReturns';
 import { generatePayments, PAYMENT_SIZES } from './payments';
 import { generateInvoices, INVOICE_SIZES } from './invoices';
+import { loadTitanic, TITANIC_SIZES } from './titanic';
+import { loadBirds, BIRD_SIZES } from './birds';
 import { loadPixels, PIXEL_IMAGES, PIXEL_TITLES, type PixelImage } from './pixels';
 
 /**
@@ -40,7 +42,7 @@ export const FAMILIES: DatasetFamily[] = [
     prefix: 'tax-cases',
     label: 'Tax customer service',
     sizes: TAX_CASE_SIZES,
-    load: async (size = 3_000) => generateTaxCases(size, 11, await fakerGB()),
+    load: async (size = 3_000) => generateTaxCases(size, TAX_CASE_SEED, await fakerGB()),
     buildingNoun: 'customer-service cases',
   },
   {
@@ -66,6 +68,27 @@ export const FAMILIES: DatasetFamily[] = [
     // per-row customer name is dropped above 50k anyway.
     load: async (size = 10_000) => generateInvoices(size, 41, await fakerGB()),
     buildingNoun: 'invoices',
+  },
+  {
+    prefix: 'titanic',
+    label: 'Titanic',
+    sizes: TITANIC_SIZES,
+    load: () => loadTitanic(),
+    buildingNoun: 'passengers',
+    // One fixed collection, so its key carries no size — `?dataset=titanic`
+    // is the obvious link, and it should match the menu rather than fall
+    // through to the off-menu fallback.
+    menu: () => [{ key: 'titanic', label: `Titanic — ${TITANIC_SIZES[0].toLocaleString()} passengers` }],
+    describe: () => `the ${TITANIC_SIZES[0].toLocaleString()} passengers of the Titanic`,
+  },
+  {
+    prefix: 'birds',
+    label: 'Birds of the world',
+    // Prebaked, like titanic: the JSON and the photo sheets are committed, and
+    // `load` is async because it fetches and decodes them before `buildCards`.
+    sizes: BIRD_SIZES,
+    load: (size = BIRD_SIZES[0]) => loadBirds(size),
+    buildingNoun: 'birds',
   },
   {
     prefix: 'products',

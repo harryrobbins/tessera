@@ -1,6 +1,6 @@
 # Scripts
 
-Every script here except `tour-shots.mjs` boots its own vite on its own port, drives the bundled
+Every script here except `tour-shots.mjs` and `export-csv.mjs` boots its own vite on its own port, drives the bundled
 Linux Chromium through Playwright (see the `playwright-wsl` skill on WSL2),
 and kills the server on exit. `--keep-server` attaches to one already running;
 `--swiftshader` forces a CPU-only, reproducible run.
@@ -18,6 +18,7 @@ and kills the server on exit. `--keep-server` attaches to one already running;
 | `perf-probe.mjs` | 5312 (preview) | not a check: the numbers `pnpm bench` does not cover — load time with a breakdown, solve time per layout, frame time on the map with and without the glow, the settle hitch at the fitted view, and bytes handed to GPU textures and buffers. Serves `dist/`, so run `pnpm build` first. Writes `bench-results/probe-<label>.json` |
 | `_verify-subpath.mjs` | 4173 (preview) | built demo boots under a `/tessera/` mount; run by the deploy workflow |
 | `generate-voiceover.mjs` (`pnpm voiceover`) | — | ElevenLabs narration clips for the tour (`--dry-run`, `--force`, `--only <id>`, `--list-voices`, `--add-voice`) |
+| `export-csv.mjs` | — (no browser) | not a check: every collection as CSV, for looking at the data in DuckDB or a spreadsheet. `node scripts/export-csv.mjs [outDir] [key ...]`; defaults to `scratch/sample-data/`, which is gitignored because a 100k-row collection is a 30 MB file that is a pure function of its generator and seed |
 
 `vite.e2e.config.mjs` is the dev-server config the tour e2e uses: HMR and
 the type-checker overlay off so a concurrent edit cannot reload the page

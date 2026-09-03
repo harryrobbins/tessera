@@ -259,6 +259,79 @@ describe('DetailPane as a modal (I-4.1, I-4.3)', () => {
     expect(el.querySelector('.context .note')!.textContent).toContain('2');
   });
 
+  /**
+   * The declared picture. It is an enhancement on top of a record that has to
+   * read perfectly without it, so what is tested is mostly what happens when
+   * it is absent, empty, or fails.
+   */
+  describe('detail.image', () => {
+    const withImage = (image: unknown, extra: Partial<Dataset> = {}) =>
+      withDetail({ detail: { ...withDetail().detail!, image }, ...extra } as Partial<Dataset>);
+
+    it('draws no markup at all when the dataset declares no image', () => {
+      pane.show(withDetail(), 0, 'Team');
+      expect(el.querySelector('.photo')).toBeNull();
+    });
+
+    it('renders the image above the sections, with alt, credit and lazy loading', () => {
+      pane.show(withImage({
+        src: (i: number) => `https://example.test/${i}.jpg`,
+        credit: () => 'A Photographer · Public domain',
+      }), 1, 'Team');
+      const img = el.querySelector<HTMLImageElement>('.photo img')!;
+      expect(img.getAttribute('src')).toBe('https://example.test/1.jpg');
+      // No explicit alt: it falls back to the record's title, as the card prints it.
+      expect(img.getAttribute('alt')).toBe('Bob');
+      expect(img.getAttribute('loading')).toBe('lazy');
+      expect(img.getAttribute('decoding')).toBe('async');
+      // Never an inline handler — the pane wires the failure path in JS.
+      expect(el.innerHTML).not.toContain('onerror');
+      expect(el.querySelector('.photo figcaption')!.textContent).toBe('A Photographer · Public domain');
+      // First thing in the body, before the summary tiles and the sections.
+      expect(el.querySelector('.body')!.firstElementChild!.className).toBe('photo');
+    });
+
+    it('takes an explicit alt over the title', () => {
+      pane.show(withImage({ src: () => 'https://example.test/a.jpg', alt: () => 'A barn owl in flight' }), 0, 'Team');
+      expect(el.querySelector('img')!.getAttribute('alt')).toBe('A barn owl in flight');
+    });
+
+    it('escapes the URL, the alt and the credit', () => {
+      pane.show(withImage({
+        src: () => 'https://example.test/a.jpg?x="><script>',
+        alt: () => 'Ann <b>',
+        credit: () => 'C & <i>',
+      }), 0, 'Team');
+      expect(el.querySelectorAll('script').length).toBe(0);
+      const img = el.querySelector<HTMLImageElement>('.photo img')!;
+      expect(img.getAttribute('src')).toBe('https://example.test/a.jpg?x="><script>');
+      expect(img.getAttribute('alt')).toBe('Ann <b>');
+      expect(el.querySelector('figcaption')!.textContent).toBe('C & <i>');
+    });
+
+    it('draws nothing for a row whose URL is empty, leaving no gap', () => {
+      pane.show(withImage({ src: (i: number) => (i === 0 ? '' : 'https://example.test/a.jpg') }), 0, 'Team');
+      expect(el.querySelector('.photo')).toBeNull();
+      // The rest of the modal is untouched.
+      expect([...el.querySelectorAll('h3')].map((h) => h.textContent)).toContain('Who');
+    });
+
+    it('hides the section when the image fails, so the modal degrades to no picture', () => {
+      pane.show(withImage({ src: () => 'https://example.test/gone.jpg', credit: () => 'A Photographer' }), 0, 'Team');
+      const section = el.querySelector<HTMLElement>('.photo')!;
+      expect(section.hidden).toBe(false);
+      el.querySelector('.photo img')!.dispatchEvent(new Event('error'));
+      expect(section.hidden).toBe(true);
+      // Hidden, so it occupies no space and the record reads exactly as before.
+      expect([...el.querySelectorAll('h3')].map((h) => h.textContent)).toContain('Who');
+    });
+
+    it('ignores a column name that the dataset does not have', () => {
+      pane.show(withImage({ src: 'Nonexistent' }), 0, 'Team');
+      expect(el.querySelector('.photo')).toBeNull();
+    });
+  });
+
   it('a registered renderer still wins over the template', () => {
     registerDetail('toy-kind', (_ds, i, { accent }) => `<header style="background:${accent}"><h2 id="detailTitle">R${i}</h2></header>`);
     pane.show(withDetail({ kind: 'toy-kind' }), 1, 'Team');

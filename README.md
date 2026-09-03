@@ -32,7 +32,7 @@ scripts want Linux node and the bundled Chromium; on WSL2 see the
 | | |
 |---|---|
 | **Layouts** | Grid (sorted mosaic), Bars (cards stacked into buckets), Cross-tab (binned X × Y), Scatter (raw numeric axes), and an equal-aspect **map** that geographic collections open on — the UK drawn as night lights from its customers' coordinates |
-| **Datasets** | Tax customer-service cases (900 / 3,000 / 20,000 / 100,000; default 3,000, with UK geography and a synthetic customer), tax returns and card payments (to 1,000,000), supplier invoices (to 100,000), products (1,000 to 2,000,000) and pixel collections built from a photograph (250k or 1M pixels) |
+| **Datasets** | Tax customer-service cases (900 / 3,000 / 20,000 / 100,000; default 3,000, with UK geography and a repeat-contact customer base), the 1,309 real Titanic passengers, tax returns and card payments (to 1,000,000), supplier invoices (to 100,000), products (1,000 to 2,000,000), 900 or 2,000 birds of the world whose cards carry real pictures, and pixel collections built from a photograph (250k or 1M pixels) |
 | **Cards** | Every card is one record at any collection size; a dataset declares its own slots (topic, title, blurb, two tags, one metric) or opts into a hand-drawn design. **Cards** in the top bar switches design, drops labels for pure colour, mutes tags, or re-points the title |
 | **Interaction** | Wheel zoom about the cursor, two-finger pinch, drag pan, `−`/`+` stepped zoom, `F` to fit, click a card for its record in an expanding modal, keyboard walk with the arrow keys, cross-filtering facet sidebar, a narrated guided tour on first visit |
 | **Measurement** | Live FPS + GPU-time HUD, and a scripted benchmark that writes comparable JSON per machine |
@@ -193,11 +193,15 @@ without its clip being regenerated, and caps the total at 1.5 MB.
 
 ## Data
 
-Every collection except the pixel images is generated in the browser, on
-demand, from a seeded PRNG (`src/data/random.ts`): 1M rows in well under a
-second. Nothing is downloaded and nothing describes a real person — names come
-from a seeded [faker](https://fakerjs.dev) (`en_GB` locale, loaded lazily so it
-stays out of the main bundle).
+Most collections are generated in the browser, on demand, from a seeded PRNG
+(`src/data/random.ts`): 1M rows in well under a second, no download, and nobody
+real — names come from a seeded [faker](https://fakerjs.dev) (`en_GB` locale,
+loaded lazily so it stays out of the main bundle).
+
+Three are read rather than generated, and all three fetch from `public/data/`
+on relative paths: the **pixel** images, the **Titanic** passenger list, and
+the **birds**, whose photo sheets are prebaked because `buildCards` is
+synchronous and every image must be decoded before it runs.
 
 **A collection's shape does not depend on its size.** `tax-cases:100000` has
 the same columns, the same label column and the same card as `tax-cases:900`.
@@ -214,7 +218,9 @@ unknown key falls back to the default, `tax-cases:3000`.
 
 | Key | Rows | What it shows |
 |---|---|---|
-| `tax-cases` | 900 / 3k / 20k / 100k | Customer-service cases for a tax authority: topic, channel, priority, team, status, escalation, contacts, resolution hours, satisfaction, plus a synthetic customer with age band, area type, UK town, postcode and coordinates. The default collection and the one the tour uses. |
+| `tax-cases` | 900 / 3k / 20k / 100k | Customer-service cases for a tax authority: 28 facets over a modelled customer base — topic and reason code, channel, priority, team and adviser, status, escalation, SLA, contacts, resolution hours, handling time, satisfaction, plus a customer with age band, area type, customer type, language, support needs, UK town, postcode and coordinates. The default collection and the one the tour uses. |
+| `titanic` | 1,309 | The real passenger list of the RMS Titanic — name, class, sex, age, fare, cabin and deck, who they were travelling with, where they boarded, which lifeboat they left in and whether their body was recovered. Parsed from `public/data/titanic.csv`, not generated. |
+| `birds` | 900 / 2,000 | Birds of the world, and the only collection whose cards carry a picture of each record. Traits from AVONET (order, family, habitat, diet, trophic level, lifestyle, migration, mass, wing and beak and tail, hand-wing index, range size and centroid); images from Wikimedia Commons via Wikidata, filtered to public domain and CC0. That filter is effectively a date filter, so roughly four fifths are nineteenth-century lithographic plates rather than photographs — see `public/data/CREDITS.md`. Prebaked into AVIF sprite sheets by `pipeline/birds.py`. |
 | `tax-returns` | 900 / 10k / 100k / 1M | Self-assessment returns: sector, income band, filing month, late filing and penalties, progressive tax due. |
 | `payments` | 900 / 10k / 100k / 1M | Card payments: merchant category, method, country, hour of day, amount, and a fraud flag with a risk score driven by the same signals. |
 | `invoices` | 900 / 10k / 100k | Supplier invoices: department, spend category, supplier (36 faker names at every size, as the layouts group by them), status, days to pay. |
@@ -225,17 +231,37 @@ unknown key falls back to the default, `tax-cases:3000`.
 with coordinates and postcode areas; each tax case's customer is placed in one
 of them, weighted by population, so the map draws the country from its towns.
 
-**Engineered correlations.** Channel follows area type and age band (post is
-rural and elderly, webchat urban and young), resolution hours follow channel,
-satisfaction falls with hours, tax due is progressive in income, fraud risk
-follows the fraud signals. Every categorical has a fixed order (so `Priority`
+**Engineered correlations.** The tax-cases generator models a customer base
+and a year of arrivals rather than independent rows: a customer is drawn from a
+pool with a heavy repeat-contact tail and keeps their address, age, type and
+support needs across every case they open; where they live drives how old they
+are, and both drive the channel (post is rural and elderly, webchat urban and
+young); the calendar carries the filing-deadline peak, the working week and the
+bank holidays, and the queue that peak builds is what makes a January case take
+longer and score worse than a June one; a case is Open because it has not
+finished by the as-of day, so the backlog is recent arrivals plus a small
+complex stream, and the resolved cases carry a snapshot's survivorship;
+satisfaction is an ordinal cut of a latent that falls with the wait, and who
+answers the survey depends on it, which is why the scores are J-shaped. Tax due
+is progressive in income and fraud risk follows the fraud signals. Every categorical has a fixed order (so `Priority`
 reads Low → High and `Month` reads Jan → Dec), heavy-tailed numerics are
 clipped at generation so the 12 equal-width bins in Bars and Cross-tab read
 well, and the first facets of each family are chosen so the default colour,
 sort and axes tell a story without touching a menu. Generators are pure
 functions covered by `tests/datasets.test.ts` (determinism, marginals,
-correlations); `tests/registry.test.ts` pins the `tax-cases` column contract
-the tour depends on.
+correlations, and the joint structure a column-name contract cannot see —
+repeat customers, congestion, censoring, the working week, the J-shaped
+scores); `tests/registry.test.ts` pins the `tax-cases` column contract the tour
+depends on. The tour's narration quotes real figures from the default
+collection, so `TAX_CASE_SEED` is chosen to be a seed those figures are true
+of — `tests/tour-story.test.ts` is the oracle.
+
+**The Titanic collection is the exception.** It is the only one that is read
+rather than generated, and the only one that names real people: a public
+historical record of the disaster, credited in `public/data/CREDITS.md`. No
+other collection draws on it — invented customers get invented names (faker,
+`en_GB`), because a taxpayer wearing a drowned passenger's name is a different
+and much worse idea.
 
 **Dataset hooks** (`src/data/columnar.ts`). Beyond its columns a `Dataset` may
 declare `geo` (the map default), `rgb` (per-row true colour), `cards: false`
@@ -260,6 +286,27 @@ card: {
   custom: 'taxCase',                    // optional: a hand-painted design instead
 }
 ```
+
+Two hand-painted designs are registered in `src/gl/cards/index.ts`: `taxCase`,
+the flagship customer card, and `photo`, which fills the card with a photograph
+and draws the shared text layout over a scrim at its foot. It reads its pixels
+from a sprite sheet held in `src/gl/cards/sheet.ts` — a module-level map keyed
+by `Dataset.kind`, deliberately *not* a field on `Dataset`, which has to stay
+structured-cloneable for the transfer to the layout worker. Below a 96 px slot
+the text drops entirely and the card is the picture alone: four rows against a
+9 px font floor is not a card, and the mosaic is the point at that size. A card
+with no sheet registered, or a browser that cannot decode AVIF, falls back to
+the plain design rather than failing.
+
+**The picture is full-bleed at every size, and that is load-bearing.** The
+painter is always handed a *square* box (`CardAtlas.drawSlot` calls it with
+`slot, slot`), so confining the photograph to a band would centre-crop a square
+tile to 2.27:1 — the bird losing its head and its feet — while the same row at
+the mosaic slot kept all of itself. Zooming in re-rasterises at a larger hi-res
+tier, so the image visibly jumped as the crop changed. Filling the card at every
+size means the framing never moves and only the text fades in;
+`tests/birds.test.ts` pins the source and destination rects to be identical at
+64, 256 and 512 px.
 
 `compileCard` (`src/gl/cards/model.ts`) turns that into one closure that
 refills a **single reusable object**, so drawing a card allocates nothing but

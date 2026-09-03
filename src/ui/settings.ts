@@ -27,7 +27,7 @@ export const CARDS_KEY = 'tessera.cards.v1';
 
 export const DEFAULT_SETTINGS: CardSettings = { design: 'auto', labels: true, tags: true, title: '' };
 
-const DESIGNS = new Set(['auto', 'quiet', 'taxCase']);
+const DESIGNS = new Set(['auto', 'quiet', 'taxCase', 'photo']);
 
 /** Everything that is not a known value falls back to the default rather than
  *  throwing: this is persisted state and a stale key must never break boot. */

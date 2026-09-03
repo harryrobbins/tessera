@@ -72,6 +72,56 @@ export class FacetPanel {
     this.update();
   }
 
+  /**
+   * The active filters as category *labels*, in the collection's facet order,
+   * each field's labels in category order. Codes are positional indices into
+   * `CategoryColumn.categories` and differ between builds and sizes of the
+   * same collection, so labels are the only form that survives leaving this
+   * session — see `deepLink.ts`.
+   */
+  filterLabels(): { field: string; labels: string[] }[] {
+    const ds = this.ds;
+    if (!ds) return [];
+    const out: { field: string; labels: string[] }[] = [];
+    for (const field of ds.facets) {
+      const codes = this.filters.get(field);
+      const col = ds.columns[field];
+      if (!codes || !col || col.kind !== 'category') continue;
+      const labels = [...codes]
+        .sort((a, b) => a - b)
+        .map((c) => col.categories[c])
+        .filter((l): l is string => l !== undefined);
+      if (labels.length) out.push({ field, labels });
+    }
+    return out;
+  }
+
+  /**
+   * Replace every filter, resolving labels against the loaded collection. A
+   * field that is not a categorical facet here, or a label that no longer
+   * exists, is dropped in silence — the rest of the filter still applies.
+   *
+   * Deliberately does not fire `onChange`: the caller (a deep link being
+   * restored) sets the rest of the view too and re-solves the layout once.
+   */
+  setFilterLabels(entries: readonly { field: string; labels: readonly string[] }[]): void {
+    const ds = this.ds;
+    this.filters = new Map();
+    if (ds) {
+      for (const { field, labels } of entries) {
+        const col = ds.columns[field];
+        if (!col || col.kind !== 'category') continue;
+        const set = new Set<number>();
+        for (const label of labels) {
+          const code = col.categories.indexOf(label);
+          if (code >= 0) set.add(code);
+        }
+        if (set.size) this.filters.set(field, set);
+      }
+    }
+    this.update();
+  }
+
   /** Drop every filter, as if each clear link had been clicked. */
   clearAll(): void {
     if (this.filters.size === 0) return;

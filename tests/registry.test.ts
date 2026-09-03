@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { valueAt } from '../src/data/columnar';
 import { FAMILIES, menuEntries, parseKey, describeKey, resolveDataset, familyOf, DEFAULT_DATASET_KEY } from '../src/data/registry';
 import { TAX_CASE_SIZES, TAX_CASE_FACETS } from '../src/data/taxCases';
+import { BIRD_SIZES } from '../src/data/birds';
 
 /**
  * The tax-cases family is the onboarding dataset. Workstream C's walkthrough
@@ -21,9 +22,11 @@ describe('D1 contract (tax-cases)', () => {
     expect(ds.name).toBe('Tax customer service (900)');
     expect(ds.labelColumn).toBe('Customer');
     expect(ds.facets).toEqual([
-      'Topic', 'Channel', 'Priority', 'Region', 'Team', 'Status', 'Escalated', 'Month',
-      'Age band', 'Area type', 'Town',
-      'Longitude', 'Latitude', 'Resolution hours', 'Satisfaction', 'Contacts', 'Opened',
+      'Topic', 'Reason', 'Channel', 'Priority', 'Region', 'Team', 'Adviser',
+      'Status', 'Escalated', 'Reopened', 'Within SLA', 'Month',
+      'Customer type', 'Age band', 'Area type', 'Language', 'Support needs', 'Town',
+      'Longitude', 'Latitude', 'Resolution hours', 'Days waiting', 'Satisfaction',
+      'Contacts', 'Handling minutes', 'Prior cases', 'Opened', 'Hour opened',
     ]);
     // The original D1 columns keep their relative order (the tour is built on them).
     const d1 = ['Topic', 'Channel', 'Priority', 'Region', 'Team', 'Status', 'Escalated', 'Month', 'Resolution hours', 'Satisfaction', 'Contacts', 'Opened'];
@@ -44,14 +47,23 @@ describe('D1 contract (tax-cases)', () => {
     expect(cat('Month')).toEqual(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']);
     expect(cat('Age band')).toEqual(['18–29', '30–44', '45–59', '60–74', '75+']);
     expect(cat('Area type')).toEqual(['Urban', 'Suburban', 'Rural']);
+    expect(cat('Customer type')).toEqual(['Individual', 'Agent', 'Business']);
+    expect(cat('Language')).toEqual(['English', 'Welsh']);
+    expect(cat('Support needs')).toEqual(['Standard', 'Additional support']);
+    expect(cat('Within SLA')).toEqual(['Met', 'Missed', 'In progress']);
+    expect(cat('Reopened')).toEqual(['No', 'Yes']);
+    expect(cat('Reason').length).toBe(37);
+    expect(cat('Adviser').length).toBe(72);
     expect(cat('Town').length).toBeGreaterThan(150);
-    for (const c of ['Longitude', 'Latitude', 'Resolution hours', 'Satisfaction', 'Contacts', 'Opened']) expect(ds.columns[c]?.kind).toBe('number');
+    for (const c of ['Longitude', 'Latitude', 'Resolution hours', 'Days waiting', 'Satisfaction',
+      'Contacts', 'Handling minutes', 'Prior cases', 'Opened', 'Hour opened']) expect(ds.columns[c]?.kind).toBe('number');
     // Longitude/Latitude are the first two numeric columns, so the raw Scatter opens on the map.
     const nums = Object.keys(ds.columns).filter((k) => ds.columns[k].kind === 'number');
     expect(nums.slice(0, 2)).toEqual(['Longitude', 'Latitude']);
     expect(ds.columns.Case?.kind).toBe('text');
     expect(ds.columns.Customer?.kind).toBe('text');
     expect(ds.columns.Postcode?.kind).toBe('text');
+    expect(ds.columns.Subject?.kind).toBe('text');
     expect(valueAt(ds, 'Case', 0)).toBe('CS-25-000001');
   });
 
@@ -92,9 +104,11 @@ describe('registry', () => {
     expect(keys[0]).toBe('tax-cases:900');
     expect(keys).toContain('products:1000');
     expect(keys).toContain('pixels:great-wave:250000');
+    for (const n of BIRD_SIZES) expect(keys).toContain(`birds:${n}`);
   });
 
   it('describes keys for the toast', () => {
+    expect(describeKey(`birds:${BIRD_SIZES[0]}`)).toBe(`${BIRD_SIZES[0].toLocaleString()} birds`);
     expect(describeKey('nonsense')).toBe('3,000 customer-service cases');
     expect(describeKey('tax-cases:3000')).toBe('3,000 customer-service cases');
     expect(describeKey('products:10000')).toBe('10,000 product cards');
@@ -131,6 +145,33 @@ describe('registry', () => {
     try {
       await expect(resolveDataset('pixels:no-such-image:1000')).rejects.toThrow(/starry-night/);
       expect(fetchSpy).toHaveBeenCalledWith('data/starry-night.jpg');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('birds', () => {
+  it('is a family with an async loader over relative paths, one size list, no sub-key', () => {
+    const birds = FAMILIES.find((f) => f.prefix === 'birds')!;
+    expect(birds.sizes).toEqual(BIRD_SIZES);
+    expect(typeof birds.load).toBe('function');
+    expect(familyOf(`birds:${BIRD_SIZES[0]}`)?.prefix).toBe('birds');
+    expect(parseKey('birds:900')).toEqual({ prefix: 'birds', size: 900 });
+  });
+
+  it('fetches data/birds-<n>.json without a leading slash — the sub-path mount depends on it', async () => {
+    // Same guard as the pixels case below: jsdom has no fetch, and the first
+    // thing loadBirds does is fetch, so stub it and read the URL back.
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 404, statusText: 'Not Found' }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      await expect(resolveDataset(`birds:${BIRD_SIZES[0]}`)).rejects.toThrow(/birds-900\.json/);
+      expect(fetchSpy).toHaveBeenCalledWith('data/birds-900.json');
+      // An off-menu size falls back to the smallest rather than 404ing on a
+      // file the pipeline never baked.
+      await expect(resolveDataset('birds:42')).rejects.toThrow();
+      expect(fetchSpy).toHaveBeenLastCalledWith(`data/birds-${BIRD_SIZES[0]}.json`);
     } finally {
       vi.unstubAllGlobals();
     }

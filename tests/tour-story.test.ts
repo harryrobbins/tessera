@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTaxCases } from '../src/data/taxCases';
+import { generateTaxCases, TAX_CASE_SEED } from '../src/data/taxCases';
 import { getNumeric, getCategory } from '../src/data/columnar';
 import { COL, VAL, TOUR_DATASET } from '../src/tour/columns';
 import { NARRATION } from '../src/tour/script';
@@ -11,7 +11,7 @@ import { featuredRow, rowsWhere } from '../src/tour/actions';
  * a visitor hears a story the picture no longer tells.
  */
 const names = { seed() { /* deterministic anyway */ }, person: { firstName: () => 'Morag', lastName: () => 'Wallace' } };
-const ds = generateTaxCases(Number(TOUR_DATASET.split(':')[1]), 11, names);
+const ds = generateTaxCases(Number(TOUR_DATASET.split(':')[1]), TAX_CASE_SEED, names);
 const all = Array.from({ length: ds.n }, (_, i) => i);
 const line = (id: string) => NARRATION.find((l) => l.id === id)!.text;
 const label = (field: string, i: number) => { const c = getCategory(ds, field); return c.categories[c.codes[i]]; };

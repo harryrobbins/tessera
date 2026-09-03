@@ -1,6 +1,7 @@
 // Sub-path smoke test: the built demo served under a mount (GitHub Pages uses
-// /tessera/) must boot, load its worker and data, and switch to a pixel
-// collection without a 404. Run against `vite preview --base /tessera/`:
+// /tessera/) must boot, load its worker and data, and switch to the two
+// collections that fetch at runtime — a pixel collection and the birds photo
+// collection — without a 404. Run against `vite preview --base /tessera/`:
 //
 //   node scripts/_verify-subpath.mjs [url] [--screenshot path] [--swiftshader]
 //
@@ -30,6 +31,14 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text());
 });
+// Anything the page asked for and did not get. A data file that 404s under the
+// mount is the exact failure this script exists to catch, and the birds photo
+// sheets fail *quietly* — the cards fall back to the quiet design rather than
+// throwing — so the response is the only honest evidence.
+const missing = [];
+page.on('response', (res) => {
+  if (!res.ok() && !res.status().toString().startsWith('3')) missing.push(`${res.status()} ${res.url()}`);
+});
 
 await page.goto(url, { waitUntil: 'load' });
 
@@ -55,6 +64,28 @@ try {
   errors.push('pixel-switch-failed: ' + String(e));
 }
 
+// The birds collection fetches `data/birds-<n>.json` *and* its photo sheets,
+// all on relative paths; every one of them 404s under a mount if anything grows
+// a leading slash. The key comes from the menu rather than being hard-coded,
+// and the sheet extension is matched loosely, because both the sizes and the
+// encoding are the pipeline's to choose.
+let birdsOk = false;
+let birdsKey = undefined;
+let birdsN = undefined;
+let birdsPhotos = undefined;
+try {
+  birdsKey = await page.$eval('#dataset', (el) => Array.from(el.options).map((o) => o.value).find((v) => v.startsWith('birds:')));
+  if (!birdsKey) throw new Error('no birds option in the dataset menu');
+  await page.selectOption('#dataset', birdsKey);
+  await page.waitForFunction("window.pivot?.dataset?.kind === 'birds'", { timeout: 20000 });
+  birdsN = await page.evaluate(() => window.pivot?.dataset?.n);
+  birdsPhotos = !missing.some((m) => /birds-\d+-\d+\.(?:avif|webp)/.test(m));
+  birdsOk = birdsN > 0;
+} catch (e) {
+  birdsOk = false;
+  errors.push('birds-switch-failed: ' + String(e));
+}
+
 if (screenshot) {
   await page.waitForTimeout(2000);
   await page.screenshot({ path: screenshot });
@@ -68,8 +99,13 @@ console.log(JSON.stringify({
   datasetN,
   pixelsOk,
   pixelsRgbDefined,
+  birdsOk,
+  birdsKey,
+  birdsN,
+  birdsPhotos,
+  missing,
   pageErrors: errors,
   consoleErrors,
 }, null, 2));
 
-process.exit(errors.length > 0 || !ready || !(datasetN > 0) || !pixelsOk ? 1 : 0);
+process.exit(errors.length > 0 || !ready || !(datasetN > 0) || !pixelsOk || !birdsOk || !birdsPhotos ? 1 : 0);

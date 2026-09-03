@@ -70,3 +70,15 @@ export function hashU32(i: number, salt = 0): number {
   h = (h ^ (h >>> 16)) >>> 0;
   return h / 4294967296;
 }
+
+/**
+ * Standard normal from a hash rather than from the row stream — for fixed
+ * per-entity effects (an adviser's skill, a customer's disposition) that must
+ * be a property of that entity and not of when it happened to be drawn.
+ * Consumes no draws, so adding one never shifts the stream.
+ */
+export function hashGaussian(i: number, salt = 0): number {
+  let u = hashU32(i, salt);
+  if (u < 1e-9) u = 1e-9;
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * hashU32(i, salt + 977));
+}

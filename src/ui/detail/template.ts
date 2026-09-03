@@ -78,6 +78,44 @@ export function contextBlock(ds: Dataset, i: number, ctx: DetailContext, fields:
     + `<p class="note">Share of the ${ctx.total.toLocaleString()} ${ds.n === ctx.total ? 'records' : 'records on screen'}.</p></section>`;
 }
 
+/**
+ * The record's picture, when the dataset declares one.
+ *
+ * Nothing here is load-bearing: an empty `src` draws no markup, and an image
+ * that fails to load is removed by `wireDetailImage` below, so the modal falls
+ * back to exactly what it renders without a picture. The box is a fixed height
+ * (`.detail .photo img` in style.css) so the sections underneath are readable
+ * and in their final position before the image arrives.
+ */
+export function imageBlock(ds: Dataset, i: number, esc: (s: string) => string): string {
+  const spec = ds.detail?.image;
+  if (!spec) return '';
+  const src = read(ds, spec.src, i);
+  if (!src) return '';
+  const alt = read(ds, spec.alt, i) || titleOf(ds, i);
+  const credit = read(ds, spec.credit, i);
+  return `<section class="photo"><figure>`
+    + `<img src="${esc(src)}" alt="${esc(alt)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+    + (credit ? `<figcaption>${esc(credit)}</figcaption>` : '')
+    + `</figure></section>`;
+}
+
+/**
+ * Make the picture optional at runtime. Called once per open, after the pane
+ * writes its HTML: if the image errors — offline, 404, a blocker — the whole
+ * section is hidden, which collapses it to nothing and leaves the modal
+ * identical to one that declared no image. Wired here rather than as an inline
+ * `onerror` so the markup carries no executable attributes.
+ */
+export function wireDetailImage(root: ParentNode): void {
+  const img = root.querySelector<HTMLImageElement>('.photo img');
+  if (!img) return;
+  const drop = () => { const s = img.closest('section'); if (s) s.hidden = true; };
+  img.addEventListener('error', drop, { once: true });
+  // A cached failure can be settled before the listener is attached.
+  if (img.complete && img.naturalWidth === 0) drop();
+}
+
 export function actionsBlock(ds: Dataset, esc: (s: string) => string): string {
   const actions = ds.detail?.actions ?? [];
   if (!actions.length) return '';
@@ -134,6 +172,7 @@ export const templateDetail: DetailRenderer = (ds, i, ctx) => {
   const t = ds.detail ?? {};
   return modalHeader(ds, i, ctx) + `
     <div class="body">
+      ${imageBlock(ds, i, esc)}
       ${summaryTiles(ds, i, esc)}
       ${(t.sections ?? []).map((s) => sectionBlock(ds, i, s, esc)).join('')}
       ${contextBlock(ds, i, ctx, contextFields(ds))}

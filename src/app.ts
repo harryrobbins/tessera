@@ -266,8 +266,12 @@ export class PivotApp {
     this.datasetName = ds.name;
     this.datasetKey = key;
     this.mask = null;
-    // A photograph has one honest colouring: its own pixels.
-    this.colorBy = ds.rgb ? TRUE_COLOUR : (firstCategorical(ds) ?? ds.facets[0] ?? '');
+    // A pixel has one honest colouring: itself. A *record* that happens to
+    // carry a colour does not — a bird's mean plumage colour is a mode worth
+    // offering, but opening on it would throw away the facets that make it a
+    // collection, and leave every card's painted accent stuck on one hue.
+    // So true colour leads only where the rows are not records: `cards: false`.
+    this.colorBy = ds.rgb && ds.cards === false ? TRUE_COLOUR : (firstCategorical(ds) ?? ds.facets[0] ?? '');
 
     // The old atlas and card art stay on screen until the new layout lands,
     // but nothing may rasterise them against the new dataset: the hi-res pass

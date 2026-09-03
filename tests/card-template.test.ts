@@ -10,6 +10,8 @@ import { generateInvoices } from '../src/data/invoices';
 import { generateProducts } from '../src/data/products';
 import { generatePayments } from '../src/data/payments';
 import { generateTaxReturns } from '../src/data/taxReturns';
+import { parseBirds, BIRD_SIZES } from '../src/data/birds';
+import { birdsFixture } from './helpers/birds';
 
 /**
  * The contract between a dataset and its card: whatever a template names has
@@ -25,6 +27,10 @@ const BUILT_INS: Array<{ key: string; ds: Dataset; colorBy: string }> = [
   { key: 'products:1000', ds: generateProducts(1000), colorBy: 'Type' },
   { key: 'payments:900', ds: generatePayments(900), colorBy: 'Merchant category' },
   { key: 'tax-returns:900', ds: generateTaxReturns(900), colorBy: 'Sector' },
+  // The birds collection is fetched, not generated, so it comes through
+  // `parseBirds` on the frozen fixture — every size, because the whole point of
+  // this file is that a template names a column the collection actually has.
+  ...BIRD_SIZES.map((n) => ({ key: `birds:${n}`, ds: parseBirds(birdsFixture(n)).dataset, colorBy: 'Habitat' })),
 ];
 
 /** Rows worth checking: the first, the middle and the last. */
