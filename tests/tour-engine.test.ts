@@ -204,10 +204,10 @@ describe('fallbackMs', () => {
   });
 });
 
-function fakeAudio(behaviour: 'ended' | 'reject' | 'error' | 'hang') {
+function fakeAudio(behaviour: 'ended' | 'reject' | 'error' | 'hang', duration?: number) {
   const listeners = new Map<string, Set<() => void>>();
   const a: AudioLike & { fire(t: string): void; paused: boolean } = {
-    src: '', preload: '', muted: false, currentTime: 0, paused: true,
+    src: '', preload: '', muted: false, currentTime: 0, paused: true, duration,
     play() {
       a.paused = false;
       if (behaviour === 'reject') return Promise.reject(new Error('NotAllowedError'));
@@ -279,6 +279,32 @@ describe('AudioPlayer', () => {
     const dt = Date.now() - t0;
     expect(dt).toBeGreaterThanOrEqual(450);
     expect(dt).toBeLessThan(2000);
+  });
+
+  it('a clip that runs longer than its caption reads is not cut short', async () => {
+    // 10 s of audio behind a caption the reading-pace guess would cap at 500 ms:
+    // once the metadata is in, the cap has to follow the clip, not the words.
+    const a = fakeAudio('hang', 10);
+    const p = new AudioPlayer({ createAudio: () => a, storage: null, fastMs: 20 });
+    const t0 = Date.now();
+    const done = p.play('x', 'words', new AbortController().signal);
+    a.fire('loadedmetadata');
+    setTimeout(() => a.fire('ended'), 700);
+    await done;
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(650);
+  });
+
+  it('a rejected play() that nevertheless plays keeps the step for the whole clip', async () => {
+    // Chrome rejects play() with AbortError when a previous load is still
+    // unwinding, and then plays the clip anyway; the fallback timer must go.
+    const a = fakeAudio('reject');
+    const p = new AudioPlayer({ createAudio: () => a, storage: null, fastMs: 20 });
+    const t0 = Date.now();
+    const done = p.play('x', 'words', new AbortController().signal);
+    setTimeout(() => a.fire('playing'), 5);
+    setTimeout(() => a.fire('ended'), 300);
+    await done;
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(250);
   });
 
   it('dispose() releases the preloaded and playback elements (L-12)', () => {

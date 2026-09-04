@@ -7,6 +7,8 @@ export interface AudioLike {
   preload: string;
   muted: boolean;
   currentTime: number;
+  /** Seconds, once the browser has the clip's metadata; NaN or absent before that. */
+  readonly duration?: number;
   play(): Promise<void>;
   pause(): void;
   load?(): void;
@@ -31,9 +33,21 @@ export const FAST_KEY = 'tessera.tour.fastMs';
 const SILENCE = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
 
 /**
+ * How long a playing clip may make no progress — buffering, stalled, a decode
+ * that never completes — before the tour gives up on it and moves on.
+ */
+export const STALL_GRACE_MS = 4000;
+
+/**
  * Plays one narration clip at a time. Resolves when the clip ends, when the
  * caller aborts (next/skip), or — when audio is muted, missing, or blocked by
  * autoplay policy — after a reading-pace timer so the tour still advances.
+ *
+ * A caption's word count only ever *estimates* how long its clip runs: across
+ * the two tours the same voice reads between 1.7 and 3.4 words a second, so a
+ * clip can run half as long again as its caption reads. Nothing that can cut a
+ * clip short is therefore allowed to rest on that estimate once the browser
+ * knows the real length — see `play`.
  */
 export class AudioPlayer implements TourPlayer {
   private readonly create: () => AudioLike;
@@ -123,17 +137,55 @@ export class AudioPlayer implements TourPlayer {
         clearTimeout(ceiling);
         a.removeEventListener('ended', finish);
         a.removeEventListener('error', onFail);
+        a.removeEventListener('loadedmetadata', onMeta);
+        a.removeEventListener('durationchange', onMeta);
+        a.removeEventListener('playing', onProgress);
+        a.removeEventListener('timeupdate', onProgress);
         signal.removeEventListener('abort', onAbort);
         resolve();
       };
       const onAbort = () => { try { a.pause(); } catch { /* ignore */ } finish(); };
-      const onFail = () => { if (!done && timer === null) timer = setTimeout(finish, ms); };
+      /** Milliseconds of clip still to play, or null while the browser cannot say. */
+      const left = (): number | null => {
+        const d = a.duration;
+        if (typeof d !== 'number' || !Number.isFinite(d) || d <= 0) return null;
+        const at = Number.isFinite(a.currentTime) ? a.currentTime : 0;
+        return Math.max(0, d - at) * 1000;
+      };
+      // The clip could not play (404, decode failure, autoplay refused): hold
+      // the caption for as long as the clip would have run, or for the reading
+      // pace when even that is unknown.
+      const onFail = () => { if (!done && timer === null) timer = setTimeout(finish, left() ?? ms); };
       // A stalled stream (buffering forever, no 'ended' or 'error') must not
-      // leave the step up indefinitely: cap the wait at 3x the reading pace.
-      const ceiling = setTimeout(finish, Math.max(3 * ms, 500));
+      // leave the step up indefinitely. Until the browser has the clip's
+      // metadata this cap can only guess at its length — 3x the reading pace —
+      // and `onMeta` replaces the guess with the truth the moment there is
+      // one, so a clip that runs longer than its caption reads is never cut
+      // off mid-sentence.
+      let ceiling = setTimeout(finish, Math.max(3 * ms, 500));
+      const onMeta = () => {
+        const rest = left();
+        if (rest === null) return;
+        clearTimeout(ceiling);
+        ceiling = setTimeout(finish, rest + STALL_GRACE_MS);
+      };
+      // Sound is coming out. `play()` can reject with an AbortError while the
+      // clip nevertheless plays — a previous load still unwinding — so proof
+      // of playback retires the failure timer; and each `timeupdate` pushes
+      // the stall cap out with the playhead, which turns it into a detector
+      // for a clip that has *stopped* progressing rather than one that is
+      // merely long.
+      const onProgress = () => {
+        if (timer !== null) { clearTimeout(timer); timer = null; }
+        onMeta();
+      };
       signal.addEventListener('abort', onAbort);
       a.addEventListener('ended', finish);
       a.addEventListener('error', onFail);
+      a.addEventListener('loadedmetadata', onMeta);
+      a.addEventListener('durationchange', onMeta);
+      a.addEventListener('playing', onProgress);
+      a.addEventListener('timeupdate', onProgress);
       try {
         a.pause();
         a.src = this.url(id);
