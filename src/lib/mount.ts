@@ -58,6 +58,10 @@ export interface TesseraOptions {
   initialView?: ViewState;
   /** Told (coalesced over 150 ms) whenever the view or the collection changes. */
   onViewChange?: (view: ViewState, datasetKey: string) => void;
+  /** Told when the opening collection (`initialDataset` or a deep link) fails
+   *  to load; Tessera then opens the default collection instead and `ready`
+   *  resolves once that is on screen. */
+  onLoadError?: (datasetKey: string, error: unknown) => void;
 }
 
 export interface TesseraHandle {
@@ -839,9 +843,22 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
       const key = benchMode
         ? 'tax-cases:900'
         : (params.get('dataset') || options.initialDataset || registry.defaultKey);
-      await load(key);
+      let opened = true;
+      try {
+        await load(key);
+      } catch (err) {
+        // A bad deep link or a host source that failed must not leave the
+        // mosaic dead: report it, open the default collection, carry on.
+        const fallback = registry.defaultKey;
+        if (disposed || !fallback || fallback === registry.canonical(key)) throw err;
+        console.warn(`[tessera] could not open "${key}"; opening "${fallback}" instead`, err);
+        try { options.onLoadError?.(key, err); } catch (e) { console.error('[tessera] onLoadError threw', e); }
+        await load(fallback);
+        opened = false;
+      }
       if (disposed) return;
-      if (Object.keys(view).length) await applyView(view);
+      // The requested view belongs to the collection that failed.
+      if (opened && Object.keys(view).length) await applyView(view);
       if (disposed) return;
       live = true;
       app.start();

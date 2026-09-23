@@ -181,6 +181,29 @@ describe('mountTessera', () => {
     expect((h.app as unknown as { started: boolean }).started).toBe(false);
   });
 
+  it('falls back to the default collection when the opening one fails, and still starts', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errors: Array<[string, unknown]> = [];
+    const seen: string[] = [];
+    const h = mountTessera(root, {
+      ...sandboxed, families: [], initialDataset: 'src:bad',
+      onLoadError: (k, e) => errors.push([k, e]),
+      onViewChange: (_v, k) => seen.push(k),
+    });
+    h.registerDataset('src:a', 'A', ds('A'));
+    h.registerDataset('src:bad', 'Bad', async () => { throw new Error('boom'); });
+    await h.ready;
+    expect(h.currentDatasetKey()).toBe('src:a');
+    expect((h.app as unknown as { started: boolean }).started).toBe(true);
+    expect(errors.map(([k, e]) => [k, (e as Error).message])).toEqual([['src:bad', 'boom']]);
+    expect(warn).toHaveBeenCalled();
+    await h.applyView({ layout: 'bars' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen.at(-1)).toBe('src:a');
+    warn.mockRestore();
+    h.dispose();
+  });
+
   it('never touches history when urlSync is off', async () => {
     const spy = vi.spyOn(history, 'replaceState');
     const h = mountTessera(root, { ...sandboxed, families: [], initialDataset: 'src:a' });
