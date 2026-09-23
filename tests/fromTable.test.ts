@@ -207,3 +207,30 @@ describe('datasetFromTable: label and facets', () => {
     expect(ms).toBeLessThan(3000);
   });
 });
+
+describe('datasetFromTable: review edge cases', () => {
+  it('reads nanosecond and microsecond epoch numbers by magnitude, and out-of-range dates as Unknown', () => {
+    const ms = Date.UTC(2024, 0, 5);
+    const rows = [[ms], [ms * 1000], [ms * 1e6], [1e300], [ms]];
+    const ds = datasetFromTable(table([{ name: 'at', type: 'timestamp' }], rows));
+    expect([0, 1, 2].map((i) => valueAt(ds, 'at', i))).toEqual(['2024-01-05', '2024-01-05', '2024-01-05']);
+    expect(valueAt(ds, 'at year', 3)).toBe(UNKNOWN);
+    expect(valueAt(ds, 'at', 3)).toBe('—');
+  });
+
+  it('parses short digit strings as dates, not epoch ms', () => {
+    const ms = Date.UTC(2024, 0, 5);
+    const rows = [['2024'], ['20240105'], [String(ms)], ['2024']];
+    const ds = datasetFromTable(table([{ name: 'at', type: 'timestamp' }], rows));
+    expect(valueAt(ds, 'at year', 0)).toBe('2024');
+    expect(valueAt(ds, 'at', 1)).toBe('2024-01-05');
+    expect(valueAt(ds, 'at', 2)).toBe('2024-01-05');
+  });
+
+  it('shows currency to the penny even where Float32 cannot hold it', () => {
+    const rows = [[123456789], [5]];
+    const ds = datasetFromTable(table([{ name: 'amount', type: 'number', semantic: 'currency_minor', currency: 'GBP' }], rows));
+    expect(valueAt(ds, 'amount', 0)).toBe('£1,234,567.89');
+    expect(valueAt(ds, 'amount', 1)).toBe('£0.05');
+  });
+});

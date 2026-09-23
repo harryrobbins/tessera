@@ -13,6 +13,12 @@ export interface NumericColumn {
   max: number;
   /** Optional formatter for axis ticks / detail pane. */
   format?: (v: number) => string;
+  /**
+   * Optional exact display of row `i`, preferred over `format(values[i])` where
+   * the row is known (detail pane, cards). `values` is Float32 for layout and
+   * loses precision a label must keep (pennies on £1,234,567.89).
+   */
+  display?: (i: number) => string;
 }
 
 export interface CategoryColumn {
@@ -140,6 +146,7 @@ export function valueAt(ds: Dataset, name: string, i: number): string {
   if (c.kind === 'text') return c.at(i);
   const v = c.values[i];
   if (!Number.isFinite(v)) return '—';
+  if (c.display) return c.display(i);
   return c.format ? c.format(v) : shortNumber(v);
 }
 

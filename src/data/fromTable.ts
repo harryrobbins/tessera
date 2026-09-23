@@ -8,7 +8,8 @@
  * - number → numeric (NaN for null). `currency_minor` is divided by 100 and
  *   formatted with `Intl.NumberFormat` in the column's `currency`. A numeric
  *   `id` becomes text: an identifier is not a quantity.
- * - timestamp (ISO string or epoch ms) → numeric epoch days with a date
+ * - timestamp (ISO / YYYYMMDD string, or epoch ms, µs or ns by magnitude)
+ *   → numeric epoch days with a date
  *   format, plus derived "<title> year" and "<title> month" categories.
  * - a latitude/longitude pair (by `semantic`) → `geo`, so it opens on the map.
  * - label: a title-like column (`name`, `title`, `label`, or `…_name` …),
@@ -57,16 +58,39 @@ const TITLE_WORDS = ['name', 'title', 'label'];
 
 const isNull = (v: unknown) => v === null || v === undefined || v === '';
 
+/** Largest |ms| a JS Date can hold (±100,000,000 days). */
+const MAX_DATE_MS = 8.64e15;
+
+/**
+ * An epoch number in the unit its magnitude implies. Present-day instants are
+ * ~1.7e9 s, ~1.7e12 ms, ~1.7e15 µs and ~1.7e18 ns, so the bands are clear:
+ * |v| > 1e17 is nanoseconds, > 1e14 microseconds, else milliseconds. Seconds
+ * are NOT guessed: 1.7e9 is also a plausible ms value (20 Jan 1970), so a
+ * seconds column must be converted by the source.
+ */
+function epochToMs(v: number): number {
+  const a = Math.abs(v);
+  if (a > 1e17) return v / 1e6;
+  if (a > 1e14) return v / 1e3;
+  return v;
+}
+
 function toMs(v: unknown): number {
   if (isNull(v)) return NaN;
-  if (typeof v === 'number') return v;
-  if (v instanceof Date) return v.getTime();
-  if (typeof v === 'string') {
-    // A numeric string is epoch ms; anything else is parsed as a date.
-    if (/^-?\d+(\.\d+)?$/.test(v.trim())) return Number(v);
-    return Date.parse(v);
+  let ms = NaN;
+  if (typeof v === 'number') ms = epochToMs(v);
+  else if (v instanceof Date) ms = v.getTime();
+  else if (typeof v === 'string') {
+    const t = v.trim();
+    // A string of 10+ digits is an epoch number; shorter ones ('2024',
+    // '20240105') are dates, which Date.parse handles or YYYYMMDD spells.
+    const ymd = /^(\d{4})(\d{2})(\d{2})$/.exec(t);
+    if (/^-?\d{10,}(\.\d+)?$/.test(t)) ms = epochToMs(Number(t));
+    else if (ymd) ms = Date.UTC(+ymd[1], +ymd[2] - 1, +ymd[3]);
+    else ms = Date.parse(t);
   }
-  return NaN;
+  // Outside Date's range (toISOString would throw): Unknown.
+  return Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS ? ms : NaN;
 }
 
 function toNum(v: unknown): number {
@@ -190,13 +214,18 @@ export function datasetFromTable(table: TableData, opts: FromTableOptions = {}):
 
     if (col.type === 'number' && col.semantic !== 'id') {
       const key = keyFor(title);
-      const vals = new Float32Array(n);
+      const vals = new Float64Array(n);
       const money = col.semantic === 'currency_minor';
       for (let i = 0; i < n; i++) {
         const v = toNum(cell(i));
         vals[i] = money ? v / 100 : v;
       }
-      columns[key] = numeric(key, vals, money ? currencyFormat(col.currency) : undefined);
+      const format = money ? currencyFormat(col.currency) : undefined;
+      // The column's Float32 values are for layout; labels read the exact
+      // Float64 amount, or £1,234,567.89 would show as £1,234,567.88.
+      const c = numeric(key, vals, format);
+      if (format) c.display = (i) => format(vals[i]);
+      columns[key] = c;
       numerics.push(key);
       if (col.semantic === 'latitude') lat = key;
       if (col.semantic === 'longitude') lon = key;

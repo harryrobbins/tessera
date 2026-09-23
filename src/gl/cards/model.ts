@@ -133,10 +133,11 @@ function reader(ds: Dataset, ref: SlotRef | undefined): Reader | null {
     return (i) => categories[codes[i]] ?? '';
   }
   if (col.kind === 'text') return col.at;
-  const { values, format } = col;
+  const { values, format, display } = col;
   return (i) => {
     const v = values[i];
     if (!Number.isFinite(v)) return '';
+    if (display) return display(i);
     return format ? format(v) : shortNumber(v);
   };
 }

@@ -166,3 +166,21 @@ describe('LayoutEngine error handling (D-04)', () => {
     await expect(load).rejects.toThrow('bad clone');
   });
 });
+
+describe('LayoutEngine.dispose', () => {
+  it('rejects every outstanding load and solve with "disposed"', async () => {
+    const engine = new LayoutEngine(makeWorker);
+    const w = FakeWorker.instances[0];
+    const load = engine.load(data(5));
+    const loadReq = w.sent[0] as Extract<WorkerRequest, { type: 'load' }>;
+    w.reply({ type: 'loaded', id: loadReq.id, n: 5 });
+    await load;
+    const solve = engine.solve({ type: 'grid' }, null, 1);
+    await tick();
+    const pendingLoad = engine.load(data(6));
+    engine.dispose();
+    await expect(solve).rejects.toThrow('disposed');
+    await expect(pendingLoad).rejects.toThrow('disposed');
+    expect(w.terminated).toBe(true);
+  });
+});

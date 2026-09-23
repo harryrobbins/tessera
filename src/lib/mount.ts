@@ -148,7 +148,9 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
       groups.get(g)!.push(`<option value="${esc(e.key)}">${esc(e.label)}</option>`);
     }
     datasetSel.innerHTML = [...groups].map(([g, opts]) => `<optgroup label="${esc(g)}">${opts.join('')}</optgroup>`).join('');
-    if (loadedKey) selectDatasetOption(loadedKey);
+    // Mid-load the menu shows the collection being built, not the old one.
+    const shown = pendingKey ?? loadedKey;
+    if (shown) selectDatasetOption(shown);
   }
 
   function fillSelect(sel: HTMLSelectElement, fields: string[], selectedValue: string, allowNone = false) {
@@ -666,6 +668,8 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
 
   /** The key of the collection on screen, so a failed load can put the menu back. */
   let loadedKey = '';
+  /** The key the newest in-flight load is building, or null when none is. */
+  let pendingKey: string | null = null;
   /** Newest load wins; an older one that finishes late must not touch the chrome. */
   let loadSeq = 0;
 
@@ -683,6 +687,7 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
     const key = registry.canonical(requested);
     const seq = ++loadSeq;
     const prev = loadedKey;
+    pendingKey = key;
     sortPinned = false;
     // Keep the menu honest when the collection came from ?dataset= rather than a click.
     if (datasetSel.value !== key) selectDatasetOption(key);
@@ -712,10 +717,17 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
         y: ySel.value,
       };
       loadedKey = key;
+      pendingKey = null;
+      // A menu rebuilt mid-load (a host registering a dataset) or a temp entry
+      // for an off-menu size: point it at what is now on screen.
+      selectDatasetOption(key);
       viewChanged();
       toast(`${app.dataset!.n.toLocaleString()} cards ready in ${(performance.now() - t0).toFixed(0)} ms`, 2000);
     } catch (err) {
-      if (seq === loadSeq && prev) datasetSel.value = prev;
+      if (seq === loadSeq) {
+        pendingKey = null;
+        if (prev) selectDatasetOption(prev);
+      }
       toast(`Could not load ${registry.describe(key)}: ${err instanceof Error ? err.message : String(err)}`, 8000);
       throw err;
     }
@@ -830,10 +842,15 @@ export function mountTessera(root: HTMLElement, options: TesseraOptions = {}): T
       await load(key);
       if (disposed) return;
       if (Object.keys(view).length) await applyView(view);
+      if (disposed) return;
       live = true;
       app.start();
       if (benchOn) {
-        if (tourOn) (await loadTour()).exposeTour(tourHost);
+        if (tourOn) {
+          const t = await loadTour();
+          if (disposed) return;
+          t.exposeTour(tourHost);
+        }
         window.pivot = app;
         window.runPivotBench = async (opts) => (await import('../bench/bench'))
           .runBench(app, { sizes: opts?.sizes ?? [1000, 10_000, 100_000, 500_000, 1_000_000] });

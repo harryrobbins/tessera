@@ -146,6 +146,41 @@ describe('mountTessera', () => {
     expect(window.pivot).toBeUndefined();
   });
 
+  it('keeps the menu on the collection being built while a load is in flight, then on the loaded one', async () => {
+    const h = mountTessera(root, { ...sandboxed, families: [], initialDataset: 'src:a' });
+    h.registerDataset('src:a', 'A', ds('A'));
+    let finish!: (d: Dataset) => void;
+    h.registerDataset('src:b', 'B', () => new Promise<Dataset>((r) => { finish = r; }));
+    await h.ready;
+    const sel = root.querySelector<HTMLSelectElement>('#dataset')!;
+    const loading = h.load('src:b');
+    // A host registering a dataset mid-load rebuilds the menu: it must not
+    // snap back to the stale collection.
+    h.registerDataset('src:c', 'C', ds('C'));
+    expect(sel.value).toBe('src:b');
+    finish(ds('B'));
+    await loading;
+    // Rebuilt again after the load: still the loaded collection.
+    h.registerDataset('src:d', 'D', ds('D'));
+    expect(h.currentDatasetKey()).toBe('src:b');
+    expect(sel.value).toBe('src:b');
+    h.dispose();
+  });
+
+  it('sets no globals when disposed while boot is still applying the initial view', async () => {
+    const h = mountTessera(root, {
+      storage: null, urlSync: false, tour: false, bench: true, families: [],
+      initialDataset: 'src:a', initialView: { layout: 'bars', bucket: 'Kind' },
+    });
+    h.registerDataset('src:a', 'A', ds('A'));
+    const app = h.app as unknown as { setLayout: () => Promise<null> };
+    app.setLayout = async () => { h.dispose(); return null; };
+    await h.ready.catch(() => {});
+    expect(window.pivot).toBeUndefined();
+    expect(window.pivotBenchReady).toBeUndefined();
+    expect((h.app as unknown as { started: boolean }).started).toBe(false);
+  });
+
   it('never touches history when urlSync is off', async () => {
     const spy = vi.spyOn(history, 'replaceState');
     const h = mountTessera(root, { ...sandboxed, families: [], initialDataset: 'src:a' });

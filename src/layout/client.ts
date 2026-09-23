@@ -116,5 +116,14 @@ export class LayoutEngine implements LayoutEngineLike {
     });
   }
 
-  dispose() { this.worker.terminate(); }
+  /** Stops the worker and rejects every outstanding load and solve, which
+   *  would otherwise never settle. */
+  dispose() {
+    this.worker.terminate();
+    const err = new Error('disposed');
+    for (const l of this.loading.values()) l.reject(err);
+    this.loading.clear();
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear();
+  }
 }
