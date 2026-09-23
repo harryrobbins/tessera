@@ -14,8 +14,27 @@ export interface LayoutSolution {
   solveMs: number;
 }
 
-/** Main-thread handle on the layout worker. Only the newest request is honoured. */
-export class LayoutEngine {
+/** What `PivotApp` needs from a layout engine: the worker client below, the
+ *  in-thread `InlineLayoutEngine`, or the `ResilientLayoutEngine` that starts on
+ *  one and falls back to the other (`./engine.ts`). */
+export interface LayoutEngineLike {
+  /** Where solves run now. */
+  readonly kind: 'worker' | 'inline';
+  load(data: LayoutData): Promise<void>;
+  solve(spec: LayoutSpec, mask: Uint8Array | null, aspect: number): Promise<LayoutSolution>;
+  dispose(): void;
+}
+
+/**
+ * Main-thread handle on the layout worker. Only the newest request is honoured.
+ *
+ * The worker is *given*, not built here: a worker constructed from a URL
+ * relative to the module is bundler syntax, and the library must bundle as-is
+ * under esbuild. The Vite demo passes that expression from `main.ts`; an
+ * embedder passes whatever its sandbox allows (a `data:` URL worker).
+ */
+export class LayoutEngine implements LayoutEngineLike {
+  readonly kind = 'worker' as const;
   private worker: Worker;
   private nextId = 1;
   private pending = new Map<number, { resolve: (s: LayoutSolution) => void; reject: (e: Error) => void }>();
@@ -25,10 +44,17 @@ export class LayoutEngine {
   /** The newest load; `solve` waits on this one. */
   private loaded: Promise<void> = Promise.resolve();
 
-  constructor() {
-    this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+  /** Fired on a worker-level `error` event, after pending requests are rejected. */
+  onFatal?: (err: Error) => void;
+  /** Fired on the first reply of any kind: the worker is evidently alive. */
+  onAlive?: () => void;
+  private alive = false;
+
+  constructor(createWorker: () => Worker) {
+    this.worker = createWorker();
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const msg = e.data;
+      if (!this.alive) { this.alive = true; this.onAlive?.(); }
       if (msg.type === 'loaded') {
         const done = this.loading.get(msg.id);
         this.loading.delete(msg.id);
@@ -66,6 +92,7 @@ export class LayoutEngine {
       this.loading.clear();
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
+      this.onFatal?.(err);
     };
   }
 

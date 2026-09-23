@@ -57,6 +57,9 @@ export interface DetailPaneOptions {
   cardRect?(i: number): Rect | null;
   /** The app's transition budget; 0 under reduced motion, which skips the FLIP. */
   transitionMs?(): number;
+  /** Where focus goes on close when its origin is gone. Default: the canvas
+   *  (`#gl`), else the tour button, looked up in the document. */
+  focusFallback?(): HTMLElement | null;
 }
 
 export const DEMO_ACTION_TOAST = 'Demo only — this would open the case in the case-management system';
@@ -128,7 +131,9 @@ export class DetailPane {
     if (hadFocus) {
       const back = this.returnTo instanceof HTMLElement && this.returnTo.isConnected && this.returnTo !== document.body
         ? this.returnTo
-        : document.querySelector<HTMLElement>('#gl[tabindex]') ?? document.querySelector<HTMLElement>('#tourBtn');
+        : this.opts.focusFallback
+          ? this.opts.focusFallback()
+          : document.querySelector<HTMLElement>('#gl[tabindex]') ?? document.querySelector<HTMLElement>('#tourBtn');
       back?.focus({ preventScroll: true });
     }
     this.returnTo = null;

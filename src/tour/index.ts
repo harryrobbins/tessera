@@ -26,6 +26,10 @@ let active: { engine: TourEngine | null; ui: TourUI; close(): void } | null = nu
  * Auto-open on a first visit: `?tour=1` forces it; otherwise only when the
  * visitor has never finished or dismissed it, and is not deep-linking or
  * benchmarking.
+ *
+ * No storage at all (`null`: an embedder passed none, or a sandboxed iframe
+ * where localStorage is absent) means no auto-open: with nowhere to record a
+ * dismissal, "first visit" would be every visit.
  */
 export function shouldAutoStart(
   params: URLSearchParams,
@@ -34,7 +38,8 @@ export function shouldAutoStart(
   if (params.get('tour') === '1') return true;
   if (params.get('tour') === '0') return false;
   if (params.get('bench') === '1' || params.has('dataset')) return false;
-  try { return (storage?.getItem(TOUR_KEY) ?? null) === null; } catch { return true; }
+  if (!storage) return false;
+  try { return storage.getItem(TOUR_KEY) === null; } catch { return true; }
 }
 
 export interface StartTourOptions {
@@ -42,6 +47,11 @@ export interface StartTourOptions {
   force?: boolean;
   /** Which of `TOUR_SCRIPTS` to narrate; unknown or absent means the default. */
   tourId?: string;
+  /** Where completion, mute and pacing are remembered. Absent = safe
+   *  localStorage; null = nowhere. */
+  storage?: Storage | null;
+  /** The query the auto-open gate reads. Absent = `location.search`. */
+  params?: URLSearchParams;
 }
 
 /**
@@ -53,7 +63,8 @@ export interface StartTourOptions {
  */
 export function startTour(host: TourHost, opts: StartTourOptions = {}): TourController {
   if (active) return controller();
-  if (!opts.force && !shouldAutoStart(new URLSearchParams(location.search))) return controller();
+  const storage = opts.storage === undefined ? safeStorage() : opts.storage;
+  if (!opts.force && !shouldAutoStart(opts.params ?? currentParams(), storage)) return controller();
 
   // Naming a tour skips the question; otherwise the welcome card asks, because
   // the tours narrate different collections and the visitor is the one who
@@ -78,13 +89,13 @@ export function startTour(host: TourHost, opts: StartTourOptions = {}): TourCont
     player?.dispose();
     active = null;
   };
-  const dismiss = () => { markTourDone(); close(); };
+  const dismiss = () => { markTourDone(storage); close(); };
   active = { engine: null, ui, close };
 
   ui.showWelcome(
     (chosen) => {
       const script = tourScript(chosen ?? opts.tourId);
-      player = new AudioPlayer({ base: script.audioBase });
+      player = new AudioPlayer({ base: script.audioBase, storage });
       player.onMutedChange = (m) => ui.setMuted(m);
       ui.setMuted(player.muted);
       player.unlock();
@@ -94,7 +105,7 @@ export function startTour(host: TourHost, opts: StartTourOptions = {}): TourCont
         spotlight: (step, i, phase) => (phase === 'before' ? ui.showStep(step, i, steps.length) : ui.spotlight(step)),
         onDone: () => close(),
         onError: (err, step) => console.warn(`[tour] step "${step.id}" action failed:`, err),
-        store: safeStorage(),
+        store: storage,
         // One key for both tours, not one each: it gates the first-visit
         // auto-open, and someone who has been shown around either collection
         // has been onboarded — a second welcome card would be a nag.
@@ -108,6 +119,13 @@ export function startTour(host: TourHost, opts: StartTourOptions = {}): TourCont
   );
   return controller();
 }
+
+function currentParams(): URLSearchParams {
+  try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
+}
+
+/** Close an open tour (the embedder is being disposed). */
+export function closeTour(): void { active?.close(); }
 
 function controller(): TourController {
   return {

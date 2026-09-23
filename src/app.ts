@@ -4,13 +4,21 @@ import { wholePixelZoom, stepWholePixelZoom, stepFreeZoom } from './gl/zoom';
 import { BG, CardAtlas, slotFor, hiResCapacity, slotRect, type CardSpec } from './gl/atlas';
 import { cardPainterFor, type CardPainterOptions } from './gl/cards';
 import { visibleCards, onScreenCards, planTier, planReady, hiResTextureSize, hiResKey, hiResWorthwhile, tierBeatsBase, rasterBudgetLeft, UNIQUE_MIN_PX } from './gl/hires';
-import { LayoutEngine, type LayoutSolution } from './layout/client';
+import type { LayoutEngineLike, LayoutSolution } from './layout/client';
+import { InlineLayoutEngine } from './layout/engine';
 import { CARD_PITCH, CARD_SIZE, type LayoutSpec, type Bounds, type Axis, type LayoutData } from './layout/layouts';
 import { FrameStats } from './ui/hud';
 import { categoricalColor, fieldColors, hexToRgb, sequential, SEQUENTIAL_BLUE } from './core/palette';
 import type { Dataset } from './data/columnar';
 import { getNumeric, valueAt } from './data/columnar';
 import { resolveDataset } from './data/registry';
+
+export interface PivotAppOptions {
+  /** Where layouts are solved. Default: in-thread (`InlineLayoutEngine`). */
+  engine?: LayoutEngineLike;
+  /** Key → collection. Default: the global registry's `resolveDataset`. */
+  resolve?: (key: string) => Promise<Dataset>;
+}
 
 /** Sentinel colour field: paint every card its own true colour. */
 export const TRUE_COLOUR = '__truecolour__';
@@ -72,7 +80,8 @@ export class PivotApp {
   readonly canvas: HTMLCanvasElement;
   readonly renderer: CardRenderer;
   readonly camera: CameraController;
-  readonly engine = new LayoutEngine();
+  readonly engine: LayoutEngineLike;
+  private readonly resolve: (key: string) => Promise<Dataset>;
   readonly stats = new FrameStats(180);
   readonly frameHooks = new Set<(dtMs: number) => void>();
 
@@ -168,8 +177,10 @@ export class PivotApp {
   private idle = false;
   private wasIdle = true;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, opts: PivotAppOptions = {}) {
     this.canvas = canvas;
+    this.engine = opts.engine ?? new InlineLayoutEngine();
+    this.resolve = opts.resolve ?? ((key) => resolveDataset(key));
     this.renderer = new CardRenderer(canvas);
     this.camera = new CameraController(canvas);
     this.camera.onChange = () => { this.dirty = true; };
@@ -260,7 +271,7 @@ export class PivotApp {
    */
   async loadDataset(key: string, initial?: LayoutSpec): Promise<void> {
     const seq = ++this.loadSeq;
-    const ds = await resolveDataset(key);
+    const ds = await this.resolve(key);
     if (seq !== this.loadSeq) return; // superseded while loading
     this.dataset = ds;
     this.datasetName = ds.name;

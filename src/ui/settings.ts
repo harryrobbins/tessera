@@ -69,6 +69,8 @@ export interface CardSettingsPanelOptions {
   onChange(s: CardSettings): void;
   /** Columns offered as the title, and whether `Detailed` is available. */
   fields(): { titles: string[]; custom: CustomCard | undefined };
+  /** Where a change is persisted. Absent = safe localStorage; null = nowhere. */
+  store?: KeyValueStore | null;
 }
 
 /**
@@ -98,6 +100,12 @@ export class CardSettingsPanel {
   }
 
   get settings(): CardSettings { return { ...this.state }; }
+
+  /** Drop the document-level listeners (the embedder is unmounting). */
+  dispose(): void {
+    document.removeEventListener('keydown', this.onKeyDown, true);
+    document.removeEventListener('pointerdown', this.onOutside, true);
+  }
   get open(): boolean { return !this.el.hidden; }
 
   toggle(): void { this.open ? this.close() : this.show(); }
@@ -141,7 +149,7 @@ export class CardSettingsPanel {
     if (this.state[key] === value) return;
     this.state[key] = value;
     this.o.onChange(this.settings);
-    saveSettings(this.state);
+    saveSettings(this.state, this.o.store === undefined ? safeStorage() : this.o.store);
     this.render();
   }
 

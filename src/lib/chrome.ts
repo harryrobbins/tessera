@@ -1,0 +1,85 @@
+/**
+ * The application chrome — top bar, filter sidebar, stage and overlay — as an
+ * HTML template that `mountTessera` injects into its root.
+ *
+ * The ids are kept (the stylesheet, the tour's spotlight targets and the e2e
+ * scripts all name them), but every lookup the library makes is scoped to the
+ * root, so nothing reaches for an element outside the mount.
+ *
+ * `#overlay` sits beside `#app` rather than inside it, so the dialog can make
+ * the whole application inert behind itself and the toast fired from inside it
+ * sits above the scrim.
+ */
+export const CHROME_HTML = `
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><span class="dot"></span>Tessera</div>
+
+      <label class="field">
+        <span>Collection</span>
+        <select id="dataset"></select>
+      </label>
+      <div class="menu-extras" id="menuExtras"></div>
+
+      <div class="seg" id="layoutSeg" role="tablist" aria-label="Layout">
+        <button type="button" data-layout="grid" class="active" role="tab" aria-selected="true" tabindex="0">Grid</button>
+        <button type="button" data-layout="bars" role="tab" aria-selected="false" tabindex="-1">Bars</button>
+        <button type="button" data-layout="scatter" role="tab" aria-selected="false" tabindex="-1">Cross-tab</button>
+        <button type="button" data-layout="xy" role="tab" aria-selected="false" tabindex="-1">Scatter</button>
+      </div>
+
+      <label class="field" id="sortField">
+        <span>Sort by</span>
+        <select id="sortBy"></select>
+      </label>
+      <label class="field hidden" id="barField">
+        <span>Bucket by</span>
+        <select id="barBy"></select>
+      </label>
+      <label class="field hidden" id="xField">
+        <span>X</span>
+        <select id="axisX"></select>
+      </label>
+      <label class="field hidden" id="yField">
+        <span>Y</span>
+        <select id="axisY"></select>
+      </label>
+
+      <label class="field">
+        <span>Colour</span>
+        <select id="colorBy"></select>
+      </label>
+
+      <div class="spacer"></div>
+      <div class="seg" id="zoomSeg">
+        <button type="button" id="zoomOut" title="Zoom out (−)" aria-label="Zoom out">−</button>
+        <button type="button" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+      </div>
+      <button type="button" id="metricsBtn" class="ghost" title="Show or hide the performance readout (M)" aria-pressed="true">Metrics</button>
+      <div class="popover-host">
+        <button type="button" id="cardsBtn" class="ghost" title="How the cards are drawn">Cards</button>
+        <div class="popover" id="cardSettings" hidden></div>
+      </div>
+      <button type="button" id="fitBtn" class="ghost" title="Frame everything (F)">Fit</button>
+      <button type="button" id="tourBtn" class="ghost" title="Take the guided tour">Tour</button>
+      <button type="button" id="benchBtn" class="ghost" title="Run the FPS benchmark">Benchmark</button>
+    </header>
+
+    <aside class="sidebar" id="facets" aria-label="Filters"></aside>
+
+    <main class="stage">
+      <canvas id="gl" tabindex="0" role="application" aria-label="Card collection" aria-describedby="glHelp"></canvas>
+      <p id="glHelp" class="sr-only">Arrow keys move between cards. Enter opens the selected record. Escape clears it. Plus and minus zoom; F frames everything.</p>
+      <p id="cardLive" class="sr-only" aria-live="polite"></p>
+      <div class="cursor-chip" id="cursorChip" hidden></div>
+      <svg class="axes" id="axes" aria-hidden="true"></svg>
+      <div class="legend" id="legend"></div>
+      <div class="hud" id="hud"></div>
+    </main>
+  </div>
+  <div id="overlay">
+    <div class="scrim" id="scrim" hidden></div>
+    <div class="detail" id="detail" hidden></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+`;

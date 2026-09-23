@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^24.13.3
         version: 24.13.3
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       jsdom:
         specifier: ^30.0.1
         version: 30.0.1

@@ -476,6 +476,87 @@ kills the server on exit; screenshots land in `screenshots/`. Add
 - `node scripts/_verify-subpath.mjs` — the built demo boots under a `/tessera/` mount (run by the deploy workflow).
 - `pnpm bench` (`scripts/bench-headless.mjs`, port 5181) — see above.
 
+## Embedding Tessera
+
+Tessera is also a library. `src/main.ts` (the public demo) is a thin caller of
+it, and other hosts, such as a sandboxed Cloud OS gadget, mount the same
+engine. There is no build step. Consumers bundle the TypeScript source with
+esbuild or Vite:
+
+```jsonc
+// package.json "exports"
+".":                 "./src/lib/index.ts",
+"./style.css":       "./src/ui/style.css",
+"./worker":          "./src/layout/worker.ts",
+"./data/titanic.csv": "./public/data/titanic.csv"
+```
+
+```ts
+import { mountTessera, datasetFromTable } from 'tessera';
+
+const tessera = mountTessera(document.body, {
+  storage: null,          // no localStorage (and no tour auto-open)
+  urlSync: false,         // no deep-link read, no history.replaceState
+  tour: false,            // Tour button hidden; tour code never loaded
+  bench: false,           // Benchmark button hidden; no window globals
+  families: ['tax-cases', 'tax-returns', 'payments', 'invoices', 'products', 'titanic'],
+  fetchAsset: async (path) => new Response(TITANIC_CSV),  // instead of fetch
+  layoutWorker: () => new Worker(WORKER_DATA_URL, { type: 'module' }),
+  initialDataset: 'titanic',
+  initialView: { layout: 'bars', bucket: 'Class' },
+  onViewChange: (view, datasetKey) => save({ view, datasetKey }),
+});
+
+tessera.registerDataset('src:procgen:orders', 'Orders', () => loadOrders().then(datasetFromTable));
+await tessera.load('src:procgen:orders');
+tessera.setMenuExtras(myDataButton);
+```
+
+Every option is optional. The defaults match the demo: localStorage, URL sync,
+tour and benchmark on, all families, `fetch`. The one exception is
+`layoutWorker`: without it, layouts are solved in-thread.
+
+**Handle:**
+- `load(key)`, `getView()`, `applyView(view)` and `currentDatasetKey()`.
+  - `getView()` returns the difference from the collection's opening view, the
+    same `ViewState` that the URL carries.
+- `registerDataset(key, label, dataset | () => Promise<Dataset>, {group?})` and
+  `unregisterDataset(key)`.
+  - Runtime keys are listed under a "Connected" group, and they are resolved
+    before the unknown-key fallback.
+  - A key registered straight after mounting can be the `initialDataset`.
+- `setMenuExtras(node)` puts a host control beside the collection menu.
+- `layoutEngine()` returns `'worker' | 'inline'`.
+- `ready` settles once the opening collection is on screen.
+- `dispose()` removes the chrome, the window and document listeners, the engine
+  and any globals.
+
+**Layout worker:** the library never builds its own worker, because the
+syntax for a worker built from a module-relative URL only works inside a
+bundler. The host hands in a factory. If that factory throws, if the worker
+errors before its first reply, or if the worker is silent for 3 s, Tessera
+switches to the in-thread engine (`computeLayout`) and replays the requests
+that were waiting. A `data:` URL worker built from `tessera/worker` passes a
+`script-src data:` CSP.
+
+**`datasetFromTable(table)`** turns a row-major `TableData`
+(`{name, columns: [{name, title?, type, semantic?, currency?}], rows}`) into a
+`Dataset`:
+- Booleans and strings that repeat with 2 to 50 distinct values become
+  categories, with null shown as "Unknown".
+- Other strings and ids become text.
+- Numbers become numeric columns. `currency_minor` is divided by 100 and
+  formatted with `Intl`.
+- Timestamps become epoch days, plus `<col> year` and `<col> month`
+  categories.
+- A latitude/longitude pair sets `geo`, so the collection opens on the map.
+- Facets are the categories, then the numerics.
+- The label column is a title-like column if there is one, otherwise an id,
+  otherwise the first text column.
+
+**CSS:** `tessera/style.css` is a plain file. Import it, or inject it as a
+`<style>` element.
+
 ## Deploying
 
 Push to `main` and `.github/workflows/deploy.yml` builds and publishes to

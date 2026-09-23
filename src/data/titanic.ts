@@ -255,8 +255,8 @@ function sortCategories(column: Column | undefined, compare: (a: string, b: stri
   column.categories = want;
 }
 
-export async function loadTitanic(): Promise<Dataset> {
-  const res = await fetch('data/titanic.csv');
+export async function loadTitanic(fetchAsset: (path: string) => Promise<Response> = (p) => fetch(p)): Promise<Dataset> {
+  const res = await fetchAsset('data/titanic.csv');
   if (!res.ok) throw new Error(`failed to fetch data/titanic.csv: ${res.status} ${res.statusText}`);
   const raw = await res.text();
   // A dev server with an SPA fallback answers 200 with index.html for a file

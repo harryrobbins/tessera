@@ -25,6 +25,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* The element mountTessera injects into (the demo's #tessera, or <body>). */
+.tessera-root { height: 100%; }
+
 #app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
@@ -55,6 +58,9 @@ body {
   background: linear-gradient(135deg, #3987e5, #9085e9);
 }
 .spacer { flex: 1 1 auto; }
+/* The host's slot beside the collection menu (handle.setMenuExtras). */
+.menu-extras { display: flex; align-items: center; gap: 6px; }
+.menu-extras:empty { display: none; }
 
 .field { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .field > span { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }

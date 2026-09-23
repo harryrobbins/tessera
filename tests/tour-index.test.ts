@@ -27,8 +27,15 @@ describe('shouldAutoStart', () => {
     expect(shouldAutoStart(params(''), done)).toBe(false);
   });
 
-  it('treats unavailable storage as a first visit', () => {
-    expect(shouldAutoStart(params(''), null)).toBe(true);
+  it('never auto-opens without storage: a dismissal could not be remembered', () => {
+    // An embedder passes `storage: null` (a sandboxed iframe has none); the
+    // tour must not greet the viewer on every load there.
+    expect(shouldAutoStart(params(''), null)).toBe(false);
+    // ?tour=1 still forces it.
+    expect(shouldAutoStart(params('tour=1'), null)).toBe(true);
+  });
+
+  it('treats storage that throws on read as a first visit', () => {
     expect(shouldAutoStart(params(''), throwing)).toBe(true);
   });
 });

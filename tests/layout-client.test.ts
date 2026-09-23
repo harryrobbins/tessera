@@ -12,7 +12,7 @@ class FakeWorker {
   onerror: ((e: ErrorEvent) => void) | null = null;
   sent: WorkerRequest[] = [];
   terminated = false;
-  constructor(_url: URL, _opts?: WorkerOptions) { FakeWorker.instances.push(this); }
+  constructor(_url?: URL, _opts?: WorkerOptions) { FakeWorker.instances.push(this); }
   postMessage(msg: WorkerRequest) { this.sent.push(msg); }
   terminate() { this.terminated = true; }
   reply(msg: WorkerResponse) { this.onmessage?.({ data: msg } as MessageEvent<WorkerResponse>); }
@@ -25,6 +25,8 @@ class FakeWorker {
   }
 }
 
+/** The engine is handed its worker (the library never builds one from a URL). */
+const makeWorker = () => new FakeWorker() as unknown as Worker;
 const data = (n: number): LayoutData => ({ n, columns: {} });
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -40,7 +42,7 @@ afterEach(() => { (globalThis as { Worker?: unknown }).Worker = realWorker; });
 
 describe('LayoutEngine.load', () => {
   it('keys each load by id so two quick loads both resolve (D-05)', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const settled: string[] = [];
     const a = engine.load(data(10)).then(() => settled.push('a'));
@@ -60,7 +62,7 @@ describe('LayoutEngine.load', () => {
   });
 
   it('ignores a loaded reply for an unknown id', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     let done = false;
     const p = engine.load(data(1)).then(() => { done = true; });
@@ -75,7 +77,7 @@ describe('LayoutEngine.load', () => {
 
 describe('LayoutEngine.solve', () => {
   it('waits for the newest load before posting the layout request', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     void engine.load(data(5));
     const p = engine.solve({ type: 'grid' }, null, 1.5);
@@ -93,7 +95,7 @@ describe('LayoutEngine.solve', () => {
   });
 
   it('resolves each request by id even when replies arrive out of order', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const p1 = engine.solve({ type: 'grid' }, null, 1);
     const p2 = engine.solve({ type: 'grid', sortBy: 'x' }, null, 1);
@@ -108,7 +110,7 @@ describe('LayoutEngine.solve', () => {
 
 describe('LayoutEngine error handling (D-04)', () => {
   it('rejects the pending solve when the worker replies with an error', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const p = engine.solve({ type: 'bars', by: 'nope' }, null, 1);
     await tick();
@@ -118,7 +120,7 @@ describe('LayoutEngine error handling (D-04)', () => {
   });
 
   it('rejects every pending solve on a worker-level error event', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const p1 = engine.solve({ type: 'grid' }, null, 1);
     const p2 = engine.solve({ type: 'grid' }, null, 1);
@@ -129,7 +131,7 @@ describe('LayoutEngine error handling (D-04)', () => {
   });
 
   it('carries the layout pitch through to the solution', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const p = engine.solve({ type: 'grid' }, null, 1);
     await tick();
@@ -138,7 +140,7 @@ describe('LayoutEngine error handling (D-04)', () => {
   });
 
   it('rejects a pending load on a worker-level error, and later solves with it (M-11)', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const load = engine.load(data(1_000_000));
     const solve = engine.solve({ type: 'grid' }, null, 1);
@@ -155,7 +157,7 @@ describe('LayoutEngine error handling (D-04)', () => {
   });
 
   it('rejects a load when the worker answers it with an error reply', async () => {
-    const engine = new LayoutEngine();
+    const engine = new LayoutEngine(makeWorker);
     const w = FakeWorker.instances[0];
     const load = engine.load(data(2));
     await tick();
