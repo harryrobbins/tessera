@@ -512,6 +512,8 @@ await tessera.load('src:procgen:orders');
 tessera.setMenuExtras(myDataButton);
 ```
 
+`onLoadError(key, error)` is called when the opening collection fails to load. Tessera then opens the default collection instead of stopping.
+
 Every option is optional. The defaults match the demo: localStorage, URL sync,
 tour and benchmark on, all families, `fetch`. The one exception is
 `layoutWorker`: without it, layouts are solved in-thread.
@@ -553,6 +555,16 @@ that were waiting. A `data:` URL worker built from `tessera/worker` passes a
 - Facets are the categories, then the numerics.
 - The label column is a title-like column if there is one, otherwise an id,
   otherwise the first text column.
+- Epoch numbers are read by magnitude. Values above 1e17 are nanoseconds,
+  above 1e14 microseconds, and everything else milliseconds; seconds are never
+  guessed. Digit strings of 10 or more characters are epoch values, `YYYYMMDD`
+  is read as a UTC date, and anything else goes to `Date.parse`. A date outside
+  the range a JavaScript `Date` can hold becomes Unknown.
+- Numeric columns keep full-precision values for display
+  (`NumericColumn.display(i)`). The `Float32Array` is used for layout only, so
+  large amounts are not rounded in the detail pane.
+
+**Sandboxed hosts:** only Titanic goes through `fetchAsset`. The birds and pixels loaders call `fetch` directly, so leave those families out where `connect-src` is `'none'`.
 
 **CSS:** `tessera/style.css` is a plain file. Import it, or inject it as a
 `<style>` element.
